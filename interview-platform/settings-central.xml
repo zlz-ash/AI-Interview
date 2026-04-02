@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+	<!-- 下载依赖时使用的代理（如 Clash/V2Ray 等） -->
+	<proxies>
+		<proxy>
+			<id>download-proxy</id>
+			<active>true</active>
+			<protocol>http</protocol>
+			<host>127.0.0.1</host>
+			<port>7897</port>
+		</proxy>
+	</proxies>
+	<mirrors>
+		<!-- 使用 Maven Central 拉取 Tika（若本机有镜像可改为镜像 URL） -->
+		<mirror>
+			<id>central</id>
+			<url>https://repo.maven.apache.org/maven2</url>
+			<mirrorOf>*</mirrorOf>
+		</mirror>
+	</mirrors>
+</settings>
