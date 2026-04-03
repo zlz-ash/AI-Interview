@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 import java.nio.charset.StandardCharsets;
 import java.io.IOException;
@@ -42,7 +43,7 @@ public class AnswerEvaluationService {
     private final PromptTemplate summaryUserPromptTemplate;
     private final BeanOutputConverter<FinalSummaryDTO> summaryOutputConverter;
     private final StructuredOutputInvoker structuredOutputInvoker;
-    private final int evaluationBatchSize;
+    private final EvaluationBatchingPolicy batchingPolicy;
 
     private record EvaluationReportDTO(
         int overallScore,
@@ -61,8 +62,10 @@ public class AnswerEvaluationService {
     ) {}
 
     private record BatchEvaluationResult(
+        int batchNo,
         int startIndex,
         int endIndex,
+        List<Integer> expectedQuestionIndexes,
         EvaluationReportDTO report
     ) {}
 
@@ -72,6 +75,60 @@ public class AnswerEvaluationService {
         List<String> improvements
     ) {}
 
+    private record BatchPlan(int batchSize, int batchCount) {}
+
+    private static final class EvaluationBatchingPolicy {
+        private final int minBatchSize;
+        private final int maxBatchSize;
+        private final int maxBatchCount;
+        private final int singleBatchUpperBound;
+        private final int twoBatchUpperBound;
+        private final int largeQuestionUpperBound;
+
+        private EvaluationBatchingPolicy(
+            int minBatchSize,
+            int maxBatchSize,
+            int maxBatchCount,
+            int singleBatchUpperBound,
+            int twoBatchUpperBound,
+            int largeQuestionUpperBound
+        ) {
+            this.minBatchSize = Math.max(1, minBatchSize);
+            this.maxBatchSize = Math.max(this.minBatchSize, maxBatchSize);
+            this.maxBatchCount = Math.max(1, maxBatchCount);
+            this.singleBatchUpperBound = Math.max(1, singleBatchUpperBound);
+            this.twoBatchUpperBound = Math.max(this.singleBatchUpperBound, twoBatchUpperBound);
+            this.largeQuestionUpperBound = Math.max(this.twoBatchUpperBound, largeQuestionUpperBound);
+        }
+
+        private BatchPlan plan(int totalQuestions) {
+            if (totalQuestions <= 0) {
+                return new BatchPlan(minBatchSize, 0);
+            }
+
+            int targetBatchCount;
+            if (totalQuestions <= singleBatchUpperBound) {
+                targetBatchCount = 1;
+            } else if (totalQuestions <= twoBatchUpperBound) {
+                targetBatchCount = 2;
+            } else if (totalQuestions <= largeQuestionUpperBound) {
+                targetBatchCount = Math.max(3, ceilDiv(totalQuestions, maxBatchSize));
+            } else {
+                targetBatchCount = ceilDiv(totalQuestions, maxBatchSize);
+            }
+
+            targetBatchCount = Math.min(Math.max(1, targetBatchCount), maxBatchCount);
+            int batchSize = ceilDiv(totalQuestions, targetBatchCount);
+            batchSize = Math.max(minBatchSize, Math.min(maxBatchSize, batchSize));
+            int actualBatchCount = ceilDiv(totalQuestions, batchSize);
+            return new BatchPlan(batchSize, actualBatchCount);
+        }
+
+        private int ceilDiv(int numerator, int denominator) {
+            return (numerator + denominator - 1) / denominator;
+        }
+    }
+
     public AnswerEvaluationService(
             ChatClient.Builder chatClientBuilder,
             StructuredOutputInvoker structuredOutputInvoker,
@@ -79,7 +136,12 @@ public class AnswerEvaluationService {
             @Value("classpath:prompts/interview-evaluation-user.st") Resource userPromptResource,
             @Value("classpath:prompts/interview-evaluation-summary-system.st") Resource summarySystemPromptResource,
             @Value("classpath:prompts/interview-evaluation-summary-user.st") Resource summaryUserPromptResource,
-            @Value("${app.interview.evaluation.batch-size:8}") int evaluationBatchSize) throws IOException {
+            @Value("${app.interview.evaluation.batch.min-size:4}") int minBatchSize,
+            @Value("${app.interview.evaluation.batch.max-size:8}") int maxBatchSize,
+            @Value("${app.interview.evaluation.batch.max-batches:8}") int maxBatchCount,
+            @Value("${app.interview.evaluation.batch.single-upper-bound:6}") int singleBatchUpperBound,
+            @Value("${app.interview.evaluation.batch.double-upper-bound:15}") int twoBatchUpperBound,
+            @Value("${app.interview.evaluation.batch.large-upper-bound:30}") int largeQuestionUpperBound) throws IOException {
         this.chatClient = chatClientBuilder.build();
         this.structuredOutputInvoker = structuredOutputInvoker;
         this.systemPromptTemplate = new PromptTemplate(systemPromptResource.getContentAsString(StandardCharsets.UTF_8));
@@ -88,7 +150,14 @@ public class AnswerEvaluationService {
         this.summarySystemPromptTemplate = new PromptTemplate(summarySystemPromptResource.getContentAsString(StandardCharsets.UTF_8));
         this.summaryUserPromptTemplate = new PromptTemplate(summaryUserPromptResource.getContentAsString(StandardCharsets.UTF_8));
         this.summaryOutputConverter = new BeanOutputConverter<>(FinalSummaryDTO.class);
-        this.evaluationBatchSize = Math.max(1, evaluationBatchSize);
+        this.batchingPolicy = new EvaluationBatchingPolicy(
+            minBatchSize,
+            maxBatchSize,
+            maxBatchCount,
+            singleBatchUpperBound,
+            twoBatchUpperBound,
+            largeQuestionUpperBound
+        );
     }
 
     public InterviewReportDTO evaluateInterview(String sessionId, String resumeText,
@@ -104,7 +173,7 @@ public class AnswerEvaluationService {
             // 分批评估，避免单次上下文过大导致 token 超限
             List<BatchEvaluationResult> batchResults = evaluateInBatches(sessionId, resumeSummary, questions);
 
-            List<QuestionEvaluationDTO> mergedEvaluations = mergeQuestionEvaluations(batchResults);
+            List<QuestionEvaluationDTO> mergedEvaluations = mergeQuestionEvaluations(batchResults, questions);
             String fallbackOverallFeedback = mergeOverallFeedback(batchResults);
             List<String> fallbackStrengths = mergeListItems(batchResults, true);
             List<String> fallbackImprovements = mergeListItems(batchResults, false);
@@ -155,11 +224,25 @@ public class AnswerEvaluationService {
         List<InterviewQuestionDTO> questions
     ) {
         List<BatchEvaluationResult> results = new ArrayList<>();
-        for (int start = 0; start < questions.size(); start += evaluationBatchSize) {
-            int end = Math.min(start + evaluationBatchSize, questions.size());
+        BatchPlan batchPlan = batchingPolicy.plan(questions.size());
+        int batchSize = batchPlan.batchSize();
+        log.info("评估分批计划: sessionId={}, totalQuestions={}, batchSize={}, batchCount={}",
+            sessionId, questions.size(), batchSize, batchPlan.batchCount());
+
+        int batchNo = 1;
+        for (int start = 0; start < questions.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, questions.size());
             List<InterviewQuestionDTO> batchQuestions = questions.subList(start, end);
-            EvaluationReportDTO report = evaluateBatch(sessionId, resumeSummary, batchQuestions, start, end);
-            results.add(new BatchEvaluationResult(start, end, report));
+            long beginNs = System.nanoTime();
+            EvaluationReportDTO report = evaluateBatch(sessionId, resumeSummary, batchQuestions, start, end, batchNo);
+            long durationMs = (System.nanoTime() - beginNs) / 1_000_000;
+            List<Integer> expectedIndexes = batchQuestions.stream()
+                .map(InterviewQuestionDTO::questionIndex)
+                .toList();
+            results.add(new BatchEvaluationResult(batchNo, start, end, expectedIndexes, report));
+            log.debug("批次处理完成: sessionId={}, batchNo={}, range=[{}, {}), expectedIndexes={}, durationMs={}",
+                sessionId, batchNo, start, end, expectedIndexes, durationMs);
+            batchNo++;
         }
         return results;
     }
@@ -169,7 +252,8 @@ public class AnswerEvaluationService {
         String resumeSummary,
         List<InterviewQuestionDTO> batchQuestions,
         int start,
-        int end
+        int end,
+        int batchNo
     ) {
         String qaRecords = buildQARecords(batchQuestions);
         String systemPrompt = systemPromptTemplate.render();
@@ -191,39 +275,87 @@ public class AnswerEvaluationService {
                 "批次评估",
                 log
             );
-            log.debug("批次评估完成: sessionId={}, range=[{}, {}), batchSize={}",
-                sessionId, start, end, batchQuestions.size());
+            log.debug("批次评估完成: sessionId={}, batchNo={}, range=[{}, {}), batchSize={}",
+                sessionId, batchNo, start, end, batchQuestions.size());
             return dto;
         } catch (Exception e) {
-            log.error("批次评估失败: sessionId={}, range=[{}, {}), error={}",
-                sessionId, start, end, e.getMessage(), e);
+            log.error("批次评估失败: sessionId={}, batchNo={}, range=[{}, {}), error={}",
+                sessionId, batchNo, start, end, e.getMessage(), e);
             throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED, "面试评估失败：" + e.getMessage());
         }
     }
 
-    private List<QuestionEvaluationDTO> mergeQuestionEvaluations(List<BatchEvaluationResult> batchResults) {
-        List<QuestionEvaluationDTO> merged = new ArrayList<>();
+    private List<QuestionEvaluationDTO> mergeQuestionEvaluations(
+        List<BatchEvaluationResult> batchResults,
+        List<InterviewQuestionDTO> questions
+    ) {
+        Map<Integer, QuestionEvaluationDTO> mergedByQuestionIndex = new HashMap<>();
         for (BatchEvaluationResult result : batchResults) {
-            int expectedSize = result.endIndex() - result.startIndex();
+            List<Integer> expectedIndexes = result.expectedQuestionIndexes();
+            Set<Integer> filledIndexes = new HashSet<>();
             List<QuestionEvaluationDTO> current =
                 result.report() != null && result.report().questionEvaluations() != null
                     ? result.report().questionEvaluations()
                     : List.of();
-            for (int i = 0; i < expectedSize; i++) {
-                if (i < current.size() && current.get(i) != null) {
-                    merged.add(current.get(i));
-                } else {
-                    merged.add(new QuestionEvaluationDTO(
-                        result.startIndex() + i,
-                        0,
-                        "该题未成功生成评估结果，系统按 0 分处理。",
-                        "",
-                        List.of()
-                    ));
+            for (int i = 0; i < current.size(); i++) {
+                QuestionEvaluationDTO item = current.get(i);
+                if (item == null) {
+                    continue;
                 }
+                int normalizedIndex = normalizeQuestionIndex(item.questionIndex(), expectedIndexes, i);
+                mergedByQuestionIndex.put(normalizedIndex, new QuestionEvaluationDTO(
+                    normalizedIndex,
+                    item.score(),
+                    item.feedback(),
+                    item.referenceAnswer(),
+                    item.keyPoints() != null ? item.keyPoints() : List.of()
+                ));
+                filledIndexes.add(normalizedIndex);
+            }
+
+            for (int expectedIndex : expectedIndexes) {
+                if (filledIndexes.contains(expectedIndex)) {
+                    continue;
+                }
+                mergedByQuestionIndex.put(expectedIndex, new QuestionEvaluationDTO(
+                    expectedIndex,
+                    0,
+                    "该题未成功生成评估结果，系统按 0 分处理。",
+                    "",
+                    List.of()
+                ));
             }
         }
+
+        List<QuestionEvaluationDTO> merged = new ArrayList<>();
+        for (InterviewQuestionDTO question : questions) {
+            int questionIndex = question.questionIndex();
+            merged.add(mergedByQuestionIndex.getOrDefault(
+                questionIndex,
+                new QuestionEvaluationDTO(
+                    questionIndex,
+                    0,
+                    "该题未成功生成评估结果，系统按 0 分处理。",
+                    "",
+                    List.of()
+                )
+            ));
+        }
         return merged;
+    }
+
+    private int normalizeQuestionIndex(int modelIndex, List<Integer> expectedIndexes, int fallbackPosition) {
+        if (expectedIndexes.contains(modelIndex)) {
+            return modelIndex;
+        }
+        int zeroBasedCandidate = modelIndex - 1;
+        if (expectedIndexes.contains(zeroBasedCandidate)) {
+            return zeroBasedCandidate;
+        }
+        if (fallbackPosition >= 0 && fallbackPosition < expectedIndexes.size()) {
+            return expectedIndexes.get(fallbackPosition);
+        }
+        return expectedIndexes.isEmpty() ? modelIndex : expectedIndexes.get(0);
     }
 
     private String mergeOverallFeedback(List<BatchEvaluationResult> batchResults) {
@@ -386,13 +518,24 @@ public class AnswerEvaluationService {
 
         // 处理问题评估（防御性编程：AI 响应解析后可能为 null）
         int evaluationsSize = evaluations != null ? evaluations.size() : 0;
+        Map<Integer, QuestionEvaluationDTO> evaluationMap = new HashMap<>();
+        if (evaluations != null) {
+            for (QuestionEvaluationDTO eval : evaluations) {
+                if (eval != null) {
+                    evaluationMap.put(eval.questionIndex(), eval);
+                }
+            }
+        }
         if (evaluations == null || evaluations.isEmpty()) {
             log.warn("面试评估结果解析异常：问题评估列表为空，sessionId={}", sessionId);
         }
         for (int i = 0; i < questions.size(); i++) {
-            QuestionEvaluationDTO eval = i < evaluationsSize ? evaluations.get(i) : null;
             InterviewQuestionDTO q = questions.get(i);
             int qIndex = q.questionIndex();
+            QuestionEvaluationDTO eval = evaluationMap.get(qIndex);
+            if (eval == null && i < evaluationsSize) {
+                eval = evaluations.get(i);
+            }
             String feedback = eval != null && eval.feedback() != null
                 ? eval.feedback()
                 : "该题未成功生成评估反馈。";
