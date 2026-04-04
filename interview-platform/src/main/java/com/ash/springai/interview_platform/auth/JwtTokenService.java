@@ -18,6 +18,7 @@ import java.util.List;
 public class JwtTokenService {
 
     private static final String CLAIM_ROLES = "roles";
+    private static final String CLAIM_PERMISSIONS = "permissions";
 
     private final AuthProperties authProperties;
     private final SecretKey secretKey;
@@ -29,16 +30,17 @@ public class JwtTokenService {
 
     public String generateToken(String username, List<String> roles) {
         long expiresInSeconds = authProperties.getAccessTokenMinutes() * 60;
-        return generateToken(username, roles, expiresInSeconds);
+        return generateToken(username, roles, List.of(), expiresInSeconds);
     }
 
-    public String generateToken(String username, List<String> roles, long expiresInSeconds) {
+    public String generateToken(String username, List<String> roles, List<String> permissions, long expiresInSeconds) {
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(expiresInSeconds);
         return Jwts.builder()
             .issuer(authProperties.getJwtIssuer())
             .subject(username)
             .claim(CLAIM_ROLES, roles)
+            .claim(CLAIM_PERMISSIONS, permissions)
             .issuedAt(Date.from(now))
             .expiration(Date.from(expiresAt))
             .signWith(secretKey)
@@ -62,9 +64,12 @@ public class JwtTokenService {
         String username = claims.getSubject();
         @SuppressWarnings("unchecked")
         List<String> roles = claims.get(CLAIM_ROLES, List.class);
+        @SuppressWarnings("unchecked")
+        List<String> permissions = claims.get(CLAIM_PERMISSIONS, List.class);
         List<String> normalizedRoles = roles == null ? List.of() : new ArrayList<>(roles);
+        List<String> normalizedPermissions = permissions == null ? List.of() : new ArrayList<>(permissions);
         long expiresAt = claims.getExpiration().toInstant().getEpochSecond();
-        return new JwtUserPrincipal(username, normalizedRoles, expiresAt);
+        return new JwtUserPrincipal(username, normalizedRoles, normalizedPermissions, expiresAt);
     }
 
     private SecretKey buildKey(String secret) {
@@ -90,6 +95,11 @@ public class JwtTokenService {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public record JwtUserPrincipal(String username, List<String> roles, long expiresAtEpochSecond) {}
+    public record JwtUserPrincipal(
+        String username,
+        List<String> roles,
+        List<String> permissions,
+        long expiresAtEpochSecond
+    ) {}
 }
 

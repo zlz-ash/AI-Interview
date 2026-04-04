@@ -516,17 +516,16 @@ public class AnswerEvaluationService {
             .filter(q -> q.userAnswer() != null && !q.userAnswer().isBlank())
             .count();
 
-        // 处理问题评估（防御性编程：AI 响应解析后可能为 null）
-        int evaluationsSize = evaluations != null ? evaluations.size() : 0;
+        // 处理问题评估（防御性编程：AI 响应解析后可能为 null；归一成非 null 列表便于分析与后续 get）
+        List<QuestionEvaluationDTO> evalList = evaluations != null ? evaluations : List.of();
+        int evaluationsSize = evalList.size();
         Map<Integer, QuestionEvaluationDTO> evaluationMap = new HashMap<>();
-        if (evaluations != null) {
-            for (QuestionEvaluationDTO eval : evaluations) {
-                if (eval != null) {
-                    evaluationMap.put(eval.questionIndex(), eval);
-                }
+        for (QuestionEvaluationDTO e : evalList) {
+            if (e != null) {
+                evaluationMap.put(e.questionIndex(), e);
             }
         }
-        if (evaluations == null || evaluations.isEmpty()) {
+        if (evalList.isEmpty()) {
             log.warn("面试评估结果解析异常：问题评估列表为空，sessionId={}", sessionId);
         }
         for (int i = 0; i < questions.size(); i++) {
@@ -534,7 +533,7 @@ public class AnswerEvaluationService {
             int qIndex = q.questionIndex();
             QuestionEvaluationDTO eval = evaluationMap.get(qIndex);
             if (eval == null && i < evaluationsSize) {
-                eval = evaluations.get(i);
+                eval = evalList.get(i);
             }
             String feedback = eval != null && eval.feedback() != null
                 ? eval.feedback()

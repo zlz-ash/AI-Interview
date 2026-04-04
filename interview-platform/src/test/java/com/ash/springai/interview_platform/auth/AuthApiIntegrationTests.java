@@ -1,8 +1,14 @@
 package com.ash.springai.interview_platform.auth;
 
+import com.ash.springai.interview_platform.Entity.AuthUserEntity;
+import com.ash.springai.interview_platform.Entity.AuthRoleEntity;
+import com.ash.springai.interview_platform.Entity.AuthUserRoleEntity;
+import com.ash.springai.interview_platform.Repository.AuthRolePermissionRepository;
+import com.ash.springai.interview_platform.Repository.AuthUserRepository;
+import com.ash.springai.interview_platform.Repository.AuthUserRoleRepository;
 import com.ash.springai.interview_platform.common.Result;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,12 +18,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import java.util.Optional;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -34,18 +45,28 @@ class AuthApiIntegrationTests {
         properties.setJwtSecret("0123456789abcdef0123456789abcdef");
         properties.setJwtIssuer("interview-platform");
         properties.setAccessTokenMinutes(30);
+        properties.setRememberMeTokenDays(7);
 
-        AuthProperties.UserConfig user = new AuthProperties.UserConfig();
-        user.setUsername("ash");
-        user.setPassword("123456");
-        user.setRoles(java.util.List.of("ADMIN"));
-        AuthProperties.UserConfig normalUser = new AuthProperties.UserConfig();
-        normalUser.setUsername("bob");
-        normalUser.setPassword("123456");
-        normalUser.setRoles(java.util.List.of("USER"));
-        properties.setUsers(java.util.List.of(user, normalUser));
+        PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
+        AuthUserRepository repository = mock(AuthUserRepository.class);
+        AuthUserRoleRepository userRoleRepository = mock(AuthUserRoleRepository.class);
+        AuthRolePermissionRepository rolePermissionRepository = mock(AuthRolePermissionRepository.class);
+        AuthUserEntity ash = AuthUserEntity.of("ash", encoder.encode("123456"), true);
+        ash.setId(1L);
+        AuthUserEntity bob = AuthUserEntity.of("bob", encoder.encode("123456"), true);
+        bob.setId(2L);
+        when(repository.findByUsernameAndEnabledTrue("ash")).thenReturn(Optional.of(ash));
+        when(repository.findByUsernameAndEnabledTrue("bob")).thenReturn(Optional.of(bob));
+        AuthRoleEntity adminRole = AuthRoleEntity.of("ADMIN", "admin");
+        AuthRoleEntity userRole = AuthRoleEntity.of("USER", "user");
+        when(userRoleRepository.findByUserId(1L)).thenReturn(java.util.List.of(AuthUserRoleEntity.of(ash, adminRole)));
+        when(userRoleRepository.findByUserId(2L)).thenReturn(java.util.List.of(AuthUserRoleEntity.of(bob, userRole)));
+        when(rolePermissionRepository.findPermissionCodesByUserId(1L))
+            .thenReturn(java.util.List.of("USER:READ", "SESSION:ACCESS", "INTERVIEW:ACCESS", "RAG:ACCESS", "ADMIN:ACCESS"));
+        when(rolePermissionRepository.findPermissionCodesByUserId(2L))
+            .thenReturn(java.util.List.of("USER:READ", "SESSION:ACCESS", "INTERVIEW:ACCESS", "RAG:ACCESS"));
 
-        AuthUserService authUserService = new AuthUserService(properties, PasswordEncoderFactories.createDelegatingPasswordEncoder());
+        AuthUserService authUserService = new AuthUserService(repository, userRoleRepository, rolePermissionRepository, encoder);
         JwtTokenService tokenService = new JwtTokenService(properties);
         AuthController authController = new AuthController(authUserService, tokenService, properties);
         JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(tokenService, objectMapper);
