@@ -25,6 +25,14 @@ interface HistoryListProps {
   onSelectResume: (id: number) => void;
 }
 
+function resumeStatsFromList(resumes: ResumeListItem[]): ResumeStats {
+  return {
+    totalCount: resumes.length,
+    totalInterviewCount: resumes.reduce((s, r) => s + (r.interviewCount ?? 0), 0),
+    totalAccessCount: resumes.reduce((s, r) => s + (r.accessCount ?? 0), 0),
+  };
+}
+
 // 格式化文件大小
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -98,15 +106,15 @@ function StatCard({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-xl p-6 shadow-sm border border-slate-100"
+      className="dark-card p-6"
     >
       <div className="flex items-center gap-4">
-        <div className={`p-3 rounded-lg ${color}`}>
-          <Icon className="w-6 h-6 text-white" />
+        <div className={`rounded-xl p-3 ${color}`}>
+          <Icon className="h-6 w-6 text-white" />
         </div>
         <div>
-          <p className="text-sm text-slate-500">{label}</p>
-          <p className="text-2xl font-bold text-slate-800">{value.toLocaleString()}</p>
+          <p className="text-sm text-stone-500 dark:text-stone-400">{label}</p>
+          <p className="text-2xl font-bold text-stone-800 dark:text-stone-100">{value.toLocaleString()}</p>
         </div>
       </div>
     </motion.div>
@@ -125,12 +133,9 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
   // 静默加载数据（用于轮询）
   const loadDataSilent = useCallback(async () => {
     try {
-      const [resumeData, statsData] = await Promise.all([
-        historyApi.getResumes(),
-        historyApi.getStatistics(),
-      ]);
+      const resumeData = await historyApi.getResumes();
       setResumes(resumeData);
-      setStats(statsData);
+      setStats(resumeStatsFromList(resumeData));
     } catch (err) {
       console.error('加载数据失败', err);
     }
@@ -140,12 +145,9 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
   const loadResumes = useCallback(async () => {
     setLoading(true);
     try {
-      const [resumeData, statsData] = await Promise.all([
-        historyApi.getResumes(),
-        historyApi.getStatistics(),
-      ]);
+      const resumeData = await historyApi.getResumes();
       setResumes(resumeData);
-      setStats(statsData);
+      setStats(resumeStatsFromList(resumeData));
     } catch (err) {
       console.error('加载数据失败', err);
     } finally {

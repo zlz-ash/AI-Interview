@@ -82,4 +82,11 @@ export const interviewApi = {
   async completeInterview(sessionId: string): Promise<void> {
     return request.post<void>(`/api/interview/sessions/${sessionId}/complete`);
   },
+
+  /**
+   * 重新触发面试评估（面试已完成/已评估后可用；评估失败或需刷新报告时使用）
+   */
+  async requestReevaluation(sessionId: string): Promise<void> {
+    return request.post<void>(`/api/interview/sessions/${sessionId}/reevaluate`);
+  },
 };

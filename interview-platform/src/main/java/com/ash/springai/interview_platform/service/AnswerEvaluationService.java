@@ -345,15 +345,30 @@ public class AnswerEvaluationService {
     }
 
     private int normalizeQuestionIndex(int modelIndex, List<Integer> expectedIndexes, int fallbackPosition) {
-        if (expectedIndexes.contains(modelIndex)) {
+        if (fallbackPosition >= 0 && fallbackPosition < expectedIndexes.size()) {
+            int expectedByPosition = expectedIndexes.get(fallbackPosition);
+            if (modelIndex == expectedByPosition || modelIndex - 1 == expectedByPosition) {
+                return expectedByPosition;
+            }
+        }
+
+        int zeroBasedCandidate = modelIndex - 1;
+        boolean hasModelIndex = expectedIndexes.contains(modelIndex);
+        boolean hasZeroBasedCandidate = expectedIndexes.contains(zeroBasedCandidate);
+        if (hasModelIndex && !hasZeroBasedCandidate) {
             return modelIndex;
         }
-        int zeroBasedCandidate = modelIndex - 1;
-        if (expectedIndexes.contains(zeroBasedCandidate)) {
+        if (hasZeroBasedCandidate && !hasModelIndex) {
             return zeroBasedCandidate;
         }
         if (fallbackPosition >= 0 && fallbackPosition < expectedIndexes.size()) {
             return expectedIndexes.get(fallbackPosition);
+        }
+        if (hasModelIndex) {
+            return modelIndex;
+        }
+        if (hasZeroBasedCandidate) {
+            return zeroBasedCandidate;
         }
         return expectedIndexes.isEmpty() ? modelIndex : expectedIndexes.get(0);
     }

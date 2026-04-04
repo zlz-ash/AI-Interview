@@ -45,7 +45,7 @@ export default function ConfirmDialog({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onCancel}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+            className="fixed inset-0 z-50 bg-stone-950/55 backdrop-blur-md"
           />
 
           {/* 对话框 */}
@@ -55,15 +55,15 @@ export default function ConfirmDialog({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6"
+              className="w-full max-w-md rounded-2xl border border-stone-200/80 bg-white/95 p-6 shadow-2xl shadow-stone-900/10 backdrop-blur-md dark:border-stone-700/80 dark:bg-stone-900/95 dark:shadow-black/40"
             >
               {/* 标题 */}
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
+                <h3 className="font-display mb-4 text-xl font-semibold text-stone-900 dark:text-white">
                 {title}
               </h3>
 
               {/* 内容 */}
-                <div className="text-slate-600 dark:text-slate-300 mb-6">
+                <div className="mb-6 text-stone-600 dark:text-stone-300">
                 {typeof message === 'string' ? (
                   message && <p className="whitespace-pre-line">{message}</p>
                 ) : (
@@ -78,7 +78,7 @@ export default function ConfirmDialog({
                   <motion.button
                     onClick={onCancel}
                     disabled={loading}
-                    className="px-5 py-2.5 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="rounded-xl border border-stone-200 px-5 py-2.5 font-medium text-stone-600 transition-all hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-800"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >

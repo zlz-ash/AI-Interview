@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import { clearAuthSession, getAccessToken } from '../auth/storage';
 
 /**
  * 后端统一响应结构
@@ -15,6 +16,14 @@ const baseURL = '';
 const instance: AxiosInstance = axios.create({
   baseURL,
   timeout: 60000,
+});
+
+instance.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 /**
@@ -43,6 +52,17 @@ instance.interceptors.response.use(
     return response;
   },
   (error) => {
+    const status = error.response?.status;
+    const reqUrl = String(error.config?.url ?? '');
+
+    if (status === 401 && !reqUrl.includes('/api/auth/login')) {
+      clearAuthSession();
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
+      }
+    }
+
     // 有响应的情况：后端返回了结果（即使是错误）
     if (error.response) {
       const { data } = error.response;

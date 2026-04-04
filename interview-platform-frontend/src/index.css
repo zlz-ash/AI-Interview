@@ -1,80 +1,127 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* 启用深色模式 - 使用 class 策略 */
+/* 深色模式 - class 策略 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-
-/* 自定义主题 */
+/* 春纸本：浅黄/乳白底 + 鼠尾草绿强调（非紫、非高饱和荧光绿） */
 @theme {
-  --color-primary-50: #eef2ff;
-  --color-primary-100: #e0e7ff;
-  --color-primary-200: #c7d2fe;
-  --color-primary-300: #a5b4fc;
-  --color-primary-400: #818cf8;
-  --color-primary-500: #6366f1;
-  --color-primary-600: #4f46e5;
-  --color-primary-700: #4338ca;
-  --color-primary-800: #3730a3;
-  --color-primary-900: #312e81;
+  --color-primary-50: #f2faf5;
+  --color-primary-100: #dff3e8;
+  --color-primary-200: #bfe5d2;
+  --color-primary-300: #8fceb0;
+  --color-primary-400: #5aaa84;
+  --color-primary-500: #3d8b65;
+  --color-primary-600: #316f52;
+  --color-primary-700: #2a5a44;
+  --color-primary-800: #244839;
+  --color-primary-900: #1a3329;
 
-    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica,
-    Arial, sans-serif;
+  --font-sans: "IBM Plex Sans SC", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
 }
 
-/* 自定义基础样式 */
+/* 浅色：暖黄白纸 + 淡绿雾；深色：墨绿夜读 */
 @layer base {
-  html, body, #root {
+  html,
+  body,
+  #root {
     @apply h-full m-0 p-0;
   }
 
+  html {
+    @apply antialiased;
+  }
+
   body {
-      @apply antialiased;
-      @apply bg-gradient-to-br from-slate-50 to-indigo-50 text-slate-900;
-      @apply dark:bg-gradient-to-br dark:from-slate-900 dark:to-slate-800 dark:text-slate-100;
+    font-family: var(--font-sans);
+    @apply text-stone-800 dark:text-stone-100;
+    background-color: #fffdf7;
+    background-image:
+      radial-gradient(ellipse 130% 85% at 100% -25%, rgba(61, 139, 101, 0.07), transparent 52%),
+      radial-gradient(ellipse 85% 65% at -10% 55%, rgba(217, 249, 157, 0.35), transparent 48%),
+      radial-gradient(ellipse 70% 50% at 50% 100%, rgba(254, 252, 232, 0.9), transparent 55%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.65) 0%, transparent 40%);
+  }
+
+  .dark body {
+    background-color: #0a100e;
+    background-image:
+      radial-gradient(ellipse 95% 65% at 90% -5%, rgba(61, 139, 101, 0.12), transparent 42%),
+      radial-gradient(ellipse 50% 40% at 5% 100%, rgba(36, 72, 57, 0.45), transparent 50%),
+      linear-gradient(168deg, rgba(15, 24, 20, 0.95) 0%, transparent 58%);
+  }
+
+  body::before {
+    content: "";
+    pointer-events: none;
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    opacity: 0.028;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .dark body::before {
+    opacity: 0.05;
   }
 
   #root {
-    @apply min-h-screen;
+    @apply relative z-[1] min-h-screen;
   }
 }
 
-/* 深色模式通用样式 - 自动应用于所有卡片和容器 */
 @layer components {
-    /* 通用卡片背景 */
-    .dark-card {
-        @apply bg-white dark:bg-slate-800 rounded-2xl;
-    }
+  .dark-card {
+    @apply rounded-2xl border border-emerald-100/70 bg-white/88 shadow-sm backdrop-blur-md
+      dark:border-emerald-900/35 dark:bg-stone-900/78 dark:shadow-none;
+  }
 
-    /* 通用输入框 */
-    .dark-input {
-        @apply bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white;
-    }
+  .dark-input {
+    @apply border border-emerald-100/90 bg-white/95 text-stone-800 placeholder:text-stone-400
+      dark:border-emerald-900/40 dark:bg-stone-800/92 dark:text-stone-100 dark:placeholder:text-stone-500;
+  }
 
-    /* 通用文字颜色 */
-    .dark-text {
-        @apply text-slate-900 dark:text-white;
-    }
+  .dark-text {
+    @apply text-stone-800 dark:text-stone-100;
+  }
 
-    .dark-text-muted {
-        @apply text-slate-500 dark:text-slate-400;
-    }
+  .dark-text-muted {
+    @apply text-stone-500 dark:text-stone-400;
+  }
+
+  .ui-page-title {
+    font-family: var(--font-display);
+    @apply text-4xl font-semibold tracking-tight text-stone-800 md:text-5xl dark:text-stone-50;
+  }
+
+  .ui-kicker {
+    @apply text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-primary-600 dark:text-primary-400;
+  }
+
+  .ui-glow-ring {
+    box-shadow:
+      0 0 0 1px rgba(61, 139, 101, 0.14),
+      0 22px 44px -22px rgba(49, 111, 82, 0.22);
+  }
+
+  .dark .ui-glow-ring {
+    box-shadow:
+      0 0 0 1px rgba(143, 206, 176, 0.12),
+      0 26px 52px -26px rgba(0, 0, 0, 0.55);
+  }
 }
 
-/* 自定义滚动条 */
 @layer utilities {
   .scrollbar-thin::-webkit-scrollbar {
-    @apply w-2 h-2;
+    @apply h-2 w-2;
   }
 
-    .scrollbar-thin::-webkit-scrollbar-track {
-    @apply bg-slate-100 rounded;
-        @apply dark:bg-slate-800;
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply rounded bg-emerald-100/40 dark:bg-stone-800;
   }
 
-    .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply bg-slate-300 rounded hover:bg-slate-400;
-        @apply dark:bg-slate-600 dark:hover:bg-slate-500;
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply rounded bg-primary-300/70 hover:bg-primary-400/80 dark:bg-stone-600 dark:hover:bg-stone-500;
   }
 }

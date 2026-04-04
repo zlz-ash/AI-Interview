@@ -187,7 +187,7 @@ export default function InterviewPanel({
             <div className="fixed inset-0 bg-black/20 dark:bg-black/50 flex items-center justify-center z-50">
               <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 flex items-center gap-4">
                 <motion.div
-                    className="w-8 h-8 border-3 border-slate-200 dark:border-slate-600 border-t-primary-500 rounded-full"
+                    className="h-8 w-8 rounded-full border-[3px] border-stone-200 border-t-primary-500 dark:border-stone-600 dark:border-t-primary-400"
                 animate={{ rotate: 360 }}
                 transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
               />

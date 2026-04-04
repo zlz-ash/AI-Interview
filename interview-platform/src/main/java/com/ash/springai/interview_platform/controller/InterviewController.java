@@ -103,6 +103,14 @@ public class InterviewController {
         return Result.success(null);
     }
 
+    @PostMapping("/api/interview/sessions/{sessionId}/reevaluate")
+    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 2)
+    public Result<Void> requestReevaluation(@PathVariable String sessionId) {
+        log.info("用户触发重新评估: {}", sessionId);
+        sessionService.requestReevaluation(sessionId);
+        return Result.success(null);
+    }
+
     @GetMapping("/api/interview/sessions/{sessionId}/details")
     public Result<InterviewDetailDTO> getInterviewDetail(@PathVariable String sessionId) {
         InterviewDetailDTO detail = historyService.getInterviewDetail(sessionId);

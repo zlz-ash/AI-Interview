@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
 import {EvaluateStatus, historyApi, InterviewItem} from '../api/history';
+import {interviewApi} from '../api/interview';
 import {formatDate} from '../utils/date';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import {
@@ -163,6 +164,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [deleteItem, setDeleteItem] = useState<InterviewWithResume | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [reevaluatingSessionId, setReevaluatingSessionId] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
 
   const loadAllInterviews = useCallback(async (isPolling = false) => {
@@ -258,6 +260,19 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
       alert(err instanceof Error ? err.message : '删除失败，请稍后重试');
     } finally {
       setDeletingSessionId(null);
+    }
+  };
+
+  const handleReevaluate = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setReevaluatingSessionId(sessionId);
+    try {
+      await interviewApi.requestReevaluation(sessionId);
+      await loadAllInterviews(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '重试评估失败，请稍后重试');
+    } finally {
+      setReevaluatingSessionId(null);
     }
   };
 
@@ -453,6 +468,21 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {isEvaluateFailed(interview) && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleReevaluate(interview.sessionId, e)}
+                            disabled={reevaluatingSessionId === interview.sessionId}
+                            className="rounded-lg p-2 text-primary-600 transition-colors hover:bg-primary-50 disabled:opacity-50 dark:text-primary-400 dark:hover:bg-primary-950/50"
+                            title="重试面试评估"
+                          >
+                            {reevaluatingSessionId === interview.sessionId ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
                         {/* 导出按钮 */}
                         {isEvaluateCompleted(interview) && (
                           <button
