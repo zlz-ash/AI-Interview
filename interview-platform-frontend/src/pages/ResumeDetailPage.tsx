@@ -160,6 +160,28 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
     }
   };
 
+  const refreshSelectedInterview = useCallback(async () => {
+    const sid = selectedInterview?.sessionId;
+    if (!sid) return;
+    try {
+      const detail = await historyApi.getInterviewDetail(sid);
+      setSelectedInterview(detail);
+      await loadResumeDetailSilent();
+    } catch (err) {
+      console.error('刷新面试详情失败', err);
+    }
+  }, [selectedInterview?.sessionId, loadResumeDetailSilent]);
+
+  useEffect(() => {
+    if (detailView !== 'interviewDetail' || !selectedInterview) return;
+    const ev = selectedInterview.evaluateStatus;
+    if (ev !== 'PENDING' && ev !== 'PROCESSING') return;
+    const timer = window.setInterval(() => {
+      void refreshSelectedInterview();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [detailView, selectedInterview?.sessionId, selectedInterview?.evaluateStatus, refreshSelectedInterview]);
+
   const handleBackToInterviewList = () => {
     setDetailView('list');
     setSelectedInterview(null);
@@ -318,7 +340,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
       {/* 内容区域 */}
       <div className="relative overflow-hidden">
         {detailView === 'interviewDetail' && selectedInterview ? (
-          <InterviewDetailPanel interview={selectedInterview} />
+          <InterviewDetailPanel interview={selectedInterview} onInterviewUpdated={refreshSelectedInterview} />
         ) : (
           <AnimatePresence initial={false} custom={direction} mode="wait">
             <motion.div

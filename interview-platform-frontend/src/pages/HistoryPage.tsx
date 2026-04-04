@@ -67,17 +67,16 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
       animate={{ opacity: 1 }}
     >
       {/* 头部 */}
-      <div className="flex justify-between items-start mb-10 flex-wrap gap-6">
+      <div className="mb-10 flex flex-wrap items-start justify-between gap-6">
         <div>
-            <motion.h1
-                className="text-4xl font-bold text-slate-900 dark:text-white mb-2"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-          >
+          <motion.p className="ui-kicker mb-2" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            简历中心
+          </motion.p>
+          <motion.h1 className="ui-page-title mb-2" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
             简历库
           </motion.h1>
-            <motion.p
-                className="text-slate-500 dark:text-slate-400"
+          <motion.p
+            className="text-stone-600 dark:text-stone-400"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1 }}
@@ -86,12 +85,12 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
           </motion.p>
         </div>
 
-          <motion.div
-              className="flex items-center gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 min-w-[280px] focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100 transition-all"
+        <motion.div
+          className="dark-input flex min-w-[280px] items-center gap-3 rounded-xl px-4 py-3 shadow-sm focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500/25"
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
         >
-          <svg className="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none">
+          <svg className="h-5 w-5 text-stone-400" viewBox="0 0 24 24" fill="none">
             <circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/>
             <line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
           </svg>
@@ -100,53 +99,47 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
             placeholder="搜索简历..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 outline-none text-slate-700 placeholder:text-slate-400"
+            className="flex-1 border-0 bg-transparent outline-none text-stone-800 placeholder:text-stone-400 dark:text-stone-100"
           />
         </motion.div>
       </div>
 
       {/* 加载状态 */}
       {loading && (
-        <div className="text-center py-20">
-            <motion.div
-                className="w-10 h-10 border-3 border-slate-200 dark:text-slate-200 border-t-primary-500 rounded-full mx-auto mb-4"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          />
-            <p className="text-slate-500 dark:text-slate-400">加载中...</p>
+        <div className="py-20 text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-[3px] border-stone-200 border-t-primary-500 dark:border-stone-600 dark:border-t-primary-400" />
+            <p className="text-stone-500 dark:text-stone-400">加载中...</p>
         </div>
       )}
 
       {/* 空状态 */}
       {!loading && filteredResumes.length === 0 && (
           <motion.div
-              className="text-center py-20 bg-white dark:bg-slate-800 rounded-2xl"
+              className="dark-card py-20 text-center"
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
         >
           <div className="text-6xl mb-6">📄</div>
-              <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">暂无简历记录</h3>
-              <p className="text-slate-500 dark:text-slate-400">上传简历开始您的第一次 AI 面试分析</p>
+              <h3 className="mb-2 text-xl font-semibold text-stone-800 dark:text-stone-200">暂无简历记录</h3>
+              <p className="text-stone-500 dark:text-stone-400">上传简历开始您的第一次 AI 面试分析</p>
         </motion.div>
       )}
 
       {/* 表格 */}
       {!loading && filteredResumes.length > 0 && (
           <motion.div
-              className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm overflow-hidden"
+              className="dark-card overflow-hidden"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
           <table className="w-full">
             <thead>
-            <tr className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-100 dark:border-slate-600">
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">简历名称</th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">上传日期</th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">AI
-                    评分
-                </th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">面试状态</th>
+            <tr className="border-b border-stone-200/80 bg-stone-50/90 dark:border-stone-700 dark:bg-stone-800/50">
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">简历名称</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">上传日期</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">AI 评分</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">面试状态</th>
                 <th className="w-20"></th>
               </tr>
             </thead>

@@ -426,6 +426,18 @@ public class InterviewSessionService {
         return report;
     }
 
+    public void requestReevaluation(String sessionId) {
+        CachedSession session = getOrRestoreSession(sessionId);
+        SessionStatus status = session.getStatus();
+        if (status != SessionStatus.COMPLETED && status != SessionStatus.EVALUATED) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_COMPLETED, "面试尚未完成，无法重新评估");
+        }
+
+        persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
+        evaluateStreamProducer.sendEvaluateTask(sessionId);
+        log.info("会话 {} 已触发重新评估，任务已入队", sessionId);
+    }
+
     private InterviewSessionDTO toDTO(CachedSession session) {
         List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
         return new InterviewSessionDTO(

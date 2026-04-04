@@ -108,6 +108,7 @@
 | GET | `/api/interview/sessions/{sessionId}/report` |
 | GET | `/api/interview/sessions/unfinished/{resumeId}` |
 | POST | `/api/interview/sessions/{sessionId}/complete` |
+| POST | `/api/interview/sessions/{sessionId}/reevaluate` |
 | GET | `/api/interview/sessions/{sessionId}/details` |
 | GET | `/api/interview/sessions/{sessionId}/export` |
 | DELETE | `/api/interview/sessions/{sessionId}` |

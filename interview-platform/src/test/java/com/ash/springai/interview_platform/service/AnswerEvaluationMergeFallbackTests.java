@@ -88,6 +88,79 @@ class AnswerEvaluationMergeFallbackTests {
         );
     }
 
+    @Test
+    @DisplayName("当模型返回1-based连续题号时，不应发生整批偏移")
+    void shouldPreferBatchPositionWhenZeroAndOneBasedBothCouldMatch() throws Exception {
+        AnswerEvaluationService service = newService();
+
+        Object evalA = newQuestionEvaluation(1, 91, "A", "refA", List.of("ka"));
+        Object evalB = newQuestionEvaluation(2, 82, "B", "refB", List.of("kb"));
+        Object report = newEvaluationReport(
+            86,
+            "batch overall",
+            List.of(),
+            List.of(),
+            List.of(evalA, evalB)
+        );
+        Object batchResult = newBatchEvaluationResult(1, 0, 2, List.of(0, 1), report);
+
+        List<InterviewQuestionDTO> questions = List.of(
+            question(0, "Q0"),
+            question(1, "Q1")
+        );
+
+        List<?> merged = mergeQuestionEvaluations(service, List.of(batchResult), questions);
+
+        assertEquals(2, merged.size());
+        assertAll(
+            () -> assertEquals(0, invokeInt(merged.get(0), "questionIndex")),
+            () -> assertEquals(91, invokeInt(merged.get(0), "score")),
+            () -> assertEquals("refA", invokeString(merged.get(0), "referenceAnswer")),
+            () -> assertEquals(1, invokeInt(merged.get(1), "questionIndex")),
+            () -> assertEquals(82, invokeInt(merged.get(1), "score")),
+            () -> assertEquals("refB", invokeString(merged.get(1), "referenceAnswer"))
+        );
+    }
+
+    @Test
+    @DisplayName("当模型返回1-based索引且与0-based均可命中时，应优先按批次位置映射避免整批偏移")
+    void shouldPreferPositionMatchedIndexWhenZeroAndOneBasedAreBothPossible() throws Exception {
+        AnswerEvaluationService service = newService();
+
+        Object eval0 = newQuestionEvaluation(1, 80, "F1", "R1", List.of("k1"));
+        Object eval1 = newQuestionEvaluation(2, 70, "F2", "R2", List.of("k2"));
+        Object eval2 = newQuestionEvaluation(3, 60, "F3", "R3", List.of("k3"));
+        Object report = newEvaluationReport(
+            70,
+            "batch overall",
+            List.of(),
+            List.of(),
+            List.of(eval0, eval1, eval2)
+        );
+        Object batchResult = newBatchEvaluationResult(1, 0, 3, List.of(0, 1, 2), report);
+
+        List<InterviewQuestionDTO> questions = List.of(
+            question(0, "Q0"),
+            question(1, "Q1"),
+            question(2, "Q2")
+        );
+
+        List<?> merged = mergeQuestionEvaluations(service, List.of(batchResult), questions);
+
+        assertEquals(3, merged.size());
+        assertAll(
+            () -> assertEquals(0, invokeInt(merged.get(0), "questionIndex")),
+            () -> assertEquals(80, invokeInt(merged.get(0), "score")),
+            () -> assertEquals("R1", invokeString(merged.get(0), "referenceAnswer")),
+            () -> assertEquals(1, invokeInt(merged.get(1), "questionIndex")),
+            () -> assertEquals(70, invokeInt(merged.get(1), "score")),
+            () -> assertEquals("R2", invokeString(merged.get(1), "referenceAnswer")),
+            () -> assertEquals(2, invokeInt(merged.get(2), "questionIndex")),
+            () -> assertEquals(60, invokeInt(merged.get(2), "score")),
+            () -> assertEquals("R3", invokeString(merged.get(2), "referenceAnswer"))
+        );
+    }
+
     private AnswerEvaluationService newService() throws Exception {
         ChatClient.Builder builder = mock(ChatClient.Builder.class);
         ChatClient chatClient = mock(ChatClient.class);
