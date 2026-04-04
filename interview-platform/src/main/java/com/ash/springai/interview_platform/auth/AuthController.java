@@ -43,7 +43,7 @@ public class AuthController {
         try {
             AuthUserService.AuthenticatedUser user = authUserService.authenticate(request.username(), request.password());
             long expiresInSeconds = jwtTokenService.resolveExpiresInSeconds(request.rememberMeEnabled());
-            String token = jwtTokenService.generateToken(user.username(), user.roles(), expiresInSeconds);
+            String token = jwtTokenService.generateToken(user.username(), user.roles(), user.permissions(), expiresInSeconds);
             Map<String, Object> data = new HashMap<>();
             data.put("tokenType", "Bearer");
             data.put("accessToken", token);
@@ -51,6 +51,7 @@ public class AuthController {
             data.put("issuedAt", Instant.now().getEpochSecond());
             data.put("username", user.username());
             data.put("roles", user.roles());
+            data.put("permissions", user.permissions());
             data.put("rememberMe", request.rememberMeEnabled());
             return ResponseEntity.ok(Result.success(data));
         } catch (BadCredentialsException e) {

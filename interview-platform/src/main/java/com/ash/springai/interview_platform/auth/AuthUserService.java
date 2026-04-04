@@ -1,5 +1,10 @@
 package com.ash.springai.interview_platform.auth;
 
+import com.ash.springai.interview_platform.Entity.AuthUserEntity;
+import com.ash.springai.interview_platform.Entity.AuthUserRoleEntity;
+import com.ash.springai.interview_platform.Repository.AuthUserRepository;
+import com.ash.springai.interview_platform.Repository.AuthUserRoleRepository;
+import com.ash.springai.interview_platform.Repository.AuthRolePermissionRepository;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -8,69 +13,82 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.util.List;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 @Service
 public class AuthUserService implements UserDetailsService {
 
-    private final Map<String, AuthProperties.UserConfig> usersByUsername;
+    private final AuthUserRepository authUserRepository;
+    private final AuthUserRoleRepository authUserRoleRepository;
+    private final AuthRolePermissionRepository authRolePermissionRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public AuthUserService(AuthProperties authProperties, PasswordEncoder passwordEncoder) {
+    public AuthUserService(
+        AuthUserRepository authUserRepository,
+        AuthUserRoleRepository authUserRoleRepository,
+        AuthRolePermissionRepository authRolePermissionRepository,
+        PasswordEncoder passwordEncoder
+    ) {
+        this.authUserRepository = authUserRepository;
+        this.authUserRoleRepository = authUserRoleRepository;
+        this.authRolePermissionRepository = authRolePermissionRepository;
         this.passwordEncoder = passwordEncoder;
-        this.usersByUsername = new LinkedHashMap<>();
-        for (AuthProperties.UserConfig user : authProperties.getUsers()) {
-            if (!StringUtils.hasText(user.getUsername())) {
-                continue;
-            }
-            AuthProperties.UserConfig previous = usersByUsername.putIfAbsent(user.getUsername(), user);
-            if (previous != null) {
-                throw new IllegalStateException("检测到重复用户名配置: " + user.getUsername());
-            }
-        }
     }
 
     @Override
     public UserDetails loadUserByUsername(String username) {
-        AuthProperties.UserConfig userConfig = usersByUsername.get(username);
-        if (userConfig == null) {
-            throw new BadCredentialsException("用户名或密码错误");
-        }
+        AuthUserEntity userEntity = authUserRepository.findByUsernameAndEnabledTrue(username)
+            .orElseThrow(() -> new BadCredentialsException("用户名或密码错误"));
+        List<String> roles = resolveRoles(userEntity.getId());
+        List<String> permissions = resolvePermissions(userEntity.getId());
 
-        List<GrantedAuthority> authorities = userConfig.getRoles().stream()
+        List<GrantedAuthority> roleAuthorities = roles.stream()
             .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
             .map(role -> (GrantedAuthority) new SimpleGrantedAuthority(role))
             .toList();
+        List<GrantedAuthority> permissionAuthorities = permissions.stream()
+            .map(p -> (GrantedAuthority) new SimpleGrantedAuthority(p))
+            .toList();
 
-        return User.withUsername(userConfig.getUsername())
-            // JWT 模式下不走 Spring 登录表单流程，这里只承载用户与角色信息
-            .password(userConfig.getPassword() == null ? "" : userConfig.getPassword())
+        java.util.List<GrantedAuthority> authorities = new java.util.ArrayList<>(roleAuthorities);
+        authorities.addAll(permissionAuthorities);
+
+        return User.withUsername(userEntity.getUsername())
+            .password(userEntity.getPasswordHash())
             .authorities(authorities)
             .build();
     }
 
     public AuthenticatedUser authenticate(String username, String rawPassword) {
-        AuthProperties.UserConfig userConfig = usersByUsername.get(username);
-        if (userConfig == null || !StringUtils.hasText(userConfig.getPassword())) {
-            throw new BadCredentialsException("用户名或密码错误");
-        }
-
-        String storedPassword = userConfig.getPassword().startsWith("{")
-            ? userConfig.getPassword()
-            : "{noop}" + userConfig.getPassword();
-        boolean matches = passwordEncoder.matches(rawPassword, storedPassword);
+        AuthUserEntity userEntity = authUserRepository.findByUsernameAndEnabledTrue(username)
+            .orElseThrow(() -> new BadCredentialsException("用户名或密码错误"));
+        boolean matches = passwordEncoder.matches(rawPassword, userEntity.getPasswordHash());
 
         if (!matches) {
             throw new BadCredentialsException("用户名或密码错误");
         }
 
-        return new AuthenticatedUser(userConfig.getUsername(), userConfig.getRoles());
+        List<String> roles = resolveRoles(userEntity.getId());
+        List<String> permissions = resolvePermissions(userEntity.getId());
+        return new AuthenticatedUser(userEntity.getUsername(), roles, permissions);
     }
 
-    public record AuthenticatedUser(String username, List<String> roles) {}
+    private List<String> resolveRoles(Long userId) {
+        return authUserRoleRepository.findByUserId(userId).stream()
+            .map(AuthUserRoleEntity::getRole)
+            .filter(role -> role != null && role.isEnabled())
+            .map(role -> role.getName())
+            .distinct()
+            .toList();
+    }
+
+    private List<String> resolvePermissions(Long userId) {
+        return authRolePermissionRepository.findPermissionCodesByUserId(userId).stream()
+            .distinct()
+            .toList();
+    }
+
+    public record AuthenticatedUser(String username, List<String> roles, List<String> permissions) {}
 }
 
