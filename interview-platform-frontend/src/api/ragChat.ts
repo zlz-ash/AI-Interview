@@ -1,4 +1,5 @@
 import { request, getErrorMessage } from './request';
+import { clearAuthSession, getAccessToken } from '../auth/storage';
 
 // 统一走同源 / Vite 代理，避免 CORS
 const API_BASE_URL = '';
@@ -117,16 +118,27 @@ export const ragChatApi = {
     onError: (error: Error) => void
   ): Promise<void> {
     try {
+      const token = getAccessToken();
       const response = await fetch(
         `${API_BASE_URL}/api/rag-chat/sessions/${sessionId}/messages/stream`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({ question }),
         }
       );
 
       if (!response.ok) {
+        if (response.status === 401) {
+          clearAuthSession();
+          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+            const next = `${window.location.pathname}${window.location.search}`;
+            window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
+          }
+        }
         // 尝试解析错误响应
         try {
           const errorData = await response.json();
@@ -147,68 +159,110 @@ export const ragChatApi = {
       const decoder = new TextDecoder();
       let buffer = '';
 
-      // 从 SSE 事件中提取内容
-      const extractEventContent = (event: string): string | null => {
+      const DONE_TOKEN = '[DONE]';
+
+      // 从 SSE 事件中提取内容；返回 'DONE' 表示流结束，null 表示无内容
+      const extractEventContent = (event: string): string | null | 'DONE' => {
         if (!event.trim()) return null;
 
-        const lines = event.split('\n');
+        const lines = event.split(/\r?\n/);
         const contentParts: string[] = [];
 
         for (const line of lines) {
           if (line.startsWith('data:')) {
-            // 提取 data: 后面的内容，保留原始格式（包括缩进空格）
-            // ServerSentEvent 不会在 data: 后添加额外空格
             contentParts.push(line.substring(5));
           }
         }
 
         if (contentParts.length === 0) return null;
 
-        // 合并内容并还原转义的换行符
-        return contentParts.join('')
+        const merged = contentParts.join('')
           .replace(/\\n/g, '\n')
           .replace(/\\r/g, '\r');
+
+        if (merged.trim() === DONE_TOKEN) {
+          return 'DONE';
+        }
+
+        return merged;
       };
 
-      while (true) {
+      let streamDone = false;
+
+      const finishStream = () => {
+        if (streamDone) return;
+        streamDone = true;
+        reader.cancel().catch(() => {});
+        onComplete();
+      };
+
+      const processEvent = (event: string) => {
+        if (streamDone) return;
+        const content = extractEventContent(event);
+        if (content === 'DONE') {
+          finishStream();
+          return;
+        }
+        if (content) {
+          onMessage(content);
+        }
+      };
+
+      while (!streamDone) {
         const { done, value } = await reader.read();
 
         if (done) {
           if (buffer) {
-            const content = extractEventContent(buffer);
-            if (content) {
-              onMessage(content);
-            }
+            processEvent(buffer);
           }
-          onComplete();
+          if (!streamDone) finishStream();
           break;
         }
 
         buffer += decoder.decode(value, { stream: true });
 
-        // SSE 事件以 \n\n 分隔，但也需要处理单行的情况
-        let newlineIndex = buffer.indexOf('\n\n');
-        if (newlineIndex === -1) {
-          // 如果没有找到 \n\n，尝试处理单行 data: 格式
-          const singleLineIndex = buffer.indexOf('\n');
-          if (singleLineIndex !== -1 && buffer.substring(0, singleLineIndex).startsWith('data:')) {
-            const line = buffer.substring(0, singleLineIndex);
-            const content = extractEventContent(line);
-            if (content) {
-              onMessage(content);
+        while (!streamDone) {
+          buffer = buffer.replace(/^\r?\n+/, '');
+
+          const idxLf = buffer.indexOf('\n\n');
+          const idxCrlf = buffer.indexOf('\r\n\r\n');
+
+          let splitIndex = -1;
+          let splitLen = 0;
+
+          if (idxLf !== -1 && idxCrlf !== -1) {
+            if (idxCrlf < idxLf) {
+              splitIndex = idxCrlf;
+              splitLen = 4;
+            } else {
+              splitIndex = idxLf;
+              splitLen = 2;
             }
-            buffer = buffer.substring(singleLineIndex + 1);
+          } else if (idxCrlf !== -1) {
+            splitIndex = idxCrlf;
+            splitLen = 4;
+          } else if (idxLf !== -1) {
+            splitIndex = idxLf;
+            splitLen = 2;
           }
-          continue;
-        }
 
-        // 处理完整的事件块
-        const eventBlock = buffer.substring(0, newlineIndex);
-        buffer = buffer.substring(newlineIndex + 2);
+          if (splitIndex === -1) {
+            const singleLineIndex = buffer.indexOf('\n');
+            if (singleLineIndex !== -1) {
+              const line = buffer.substring(0, singleLineIndex).replace(/\r$/, '');
+              if (line.startsWith('data:')) {
+                processEvent(line);
+              }
+              buffer = buffer.substring(singleLineIndex + 1);
+              continue;
+            }
+            break;
+          }
 
-        const content = extractEventContent(eventBlock);
-        if (content !== null) {
-          onMessage(content);
+          const eventBlock = buffer.substring(0, splitIndex);
+          buffer = buffer.substring(splitIndex + splitLen);
+
+          processEvent(eventBlock);
         }
       }
     } catch (error) {

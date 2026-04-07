@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Eye, EyeOff, Loader2, Lock, Sparkles, User } from 'lucide-react';
 import { authApi } from '../api/auth';
 import { getErrorMessage } from '../api/request';
-import { getAccessToken, setAccessToken, setStoredUsername } from '../auth/storage';
+import { getAccessToken, setAccessToken, setStoredUsername, clearAuthSession } from '../auth/storage';
 
 function resolveRedirectPath(fromState: unknown, search: string): string {
   if (typeof fromState === 'string' && fromState.startsWith('/')) {
@@ -41,10 +41,17 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const data = await authApi.login({ username: username.trim(), password, rememberMe });
+      if (!data?.accessToken || !data.accessToken.trim()) {
+        throw new Error('登录成功但未收到有效 token，请联系管理员检查服务端返回');
+      }
       setAccessToken(data.accessToken);
+      if (!getAccessToken()) {
+        throw new Error('登录态保存失败，请重试');
+      }
       setStoredUsername(data.username);
       navigate(resolveRedirectPath(fromState, location.search), { replace: true });
     } catch (err) {
+      clearAuthSession();
       setError(getErrorMessage(err));
     } finally {
       setLoading(false);

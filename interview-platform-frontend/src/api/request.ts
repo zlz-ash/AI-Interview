@@ -18,6 +18,24 @@ const instance: AxiosInstance = axios.create({
   timeout: 60000,
 });
 
+let isRedirectingTo401 = false;
+
+function hasBearerAuthHeader(config: AxiosRequestConfig | undefined): boolean {
+  const headers = config?.headers as Record<string, unknown> | undefined;
+  const auth = headers?.Authorization ?? headers?.authorization;
+  return typeof auth === 'string' && auth.startsWith('Bearer ');
+}
+
+function handleUnauthorizedRedirect() {
+  if (isRedirectingTo401) return;
+  isRedirectingTo401 = true;
+  clearAuthSession();
+  if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+    const next = `${window.location.pathname}${window.location.search}`;
+    window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
+  }
+}
+
 instance.interceptors.request.use((config) => {
   const token = getAccessToken();
   if (token) {
@@ -55,12 +73,8 @@ instance.interceptors.response.use(
     const status = error.response?.status;
     const reqUrl = String(error.config?.url ?? '');
 
-    if (status === 401 && !reqUrl.includes('/api/auth/login')) {
-      clearAuthSession();
-      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-        const next = `${window.location.pathname}${window.location.search}`;
-        window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
-      }
+    if (status === 401 && !reqUrl.includes('/api/auth/login') && hasBearerAuthHeader(error.config)) {
+      handleUnauthorizedRedirect();
     }
 
     // 有响应的情况：后端返回了结果（即使是错误）
@@ -76,8 +90,6 @@ instance.interceptors.response.use(
     }
 
     // 没有响应的情况：真正的网络错误或连接被重置
-    // 对于文件上传，可能是网络超时或连接中断，但不一定是文件大小问题
-    // 让后端返回真实的错误信息，而不是在这里假设
     const config = error.config;
     const isUpload = config && (
       config.url?.includes('/upload') ||
@@ -85,12 +97,9 @@ instance.interceptors.response.use(
     );
 
     if (isUpload) {
-      // 文件上传失败且没有响应，可能是网络超时或连接中断
-      // 不直接假设是文件大小问题，返回更通用的错误信息
       return Promise.reject(new Error('上传失败，可能是网络超时或连接中断，请重试'));
     }
 
-    // 其他网络错误
     return Promise.reject(new Error('网络连接失败，请检查网络'));
   }
 );
@@ -118,7 +127,6 @@ export const request = {
   upload<T>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
     return instance.post(url, formData, {
       timeout: 120000,
-      headers: { 'Content-Type': 'multipart/form-data' },
       ...config,
     }).then(res => res.data);
   },

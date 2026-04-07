@@ -15,7 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -27,8 +29,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.ash.springai.interview_platform.exception.BusinessException;
 import com.ash.springai.interview_platform.exception.ErrorCode;
+import com.ash.springai.interview_platform.Entity.HybridHitDTO;
+import com.ash.springai.interview_platform.Entity.HybridMetaDTO;
 import com.ash.springai.interview_platform.Entity.QueryRequest;
 import com.ash.springai.interview_platform.Entity.QueryResponse;
+import com.ash.springai.interview_platform.Repository.FtsSearchRepository;
 
 @Slf4j
 @Service
@@ -36,12 +41,18 @@ public class KnowledgeBaseQueryService {
     
     private static final String NO_RESULT_RESPONSE = "抱歉，在选定的知识库中未检索到相关信息。请换一个更具体的关键词或补充上下文后再试。";
     private static final Pattern SHORT_TOKEN_PATTERN = Pattern.compile("^[\\p{L}\\p{N}_-]{2,20}$");
+    private static final Pattern CJK_CHAR = Pattern.compile("[\\u4E00-\\u9FFF\\u3400-\\u4DBF\\uF900-\\uFAFF]");
+    private static final int CJK_SHORT_TOKEN_MAX = 4;
     private static final int STREAM_PROBE_CHARS = 120;
 
     private final ChatClient chatClient;
     private final KnowledgeBaseVectorService vectorService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseCountService countService;
+    private final FtsSearchRepository ftsSearchRepository;
+    private final QueryIntentClassifier queryIntentClassifier;
+    private final RuleRerankService ruleRerankService;
+    private final ThresholdRelaxationPolicy thresholdRelaxationPolicy;
     private final PromptTemplate systemPromptTemplate;
     private final PromptTemplate userPromptTemplate;
     private final PromptTemplate rewritePromptTemplate;
@@ -58,6 +69,10 @@ public class KnowledgeBaseQueryService {
             KnowledgeBaseVectorService vectorService,
             KnowledgeBaseListService listService,
             KnowledgeBaseCountService countService,
+            FtsSearchRepository ftsSearchRepository,
+            QueryIntentClassifier queryIntentClassifier,
+            RuleRerankService ruleRerankService,
+            ThresholdRelaxationPolicy thresholdRelaxationPolicy,
             @Value("classpath:prompts/knowledgebase-query-system.st") Resource systemPromptResource,
             @Value("classpath:prompts/knowledgebase-query-user.st") Resource userPromptResource,
             @Value("classpath:prompts/knowledgebase-query-rewrite.st") Resource rewritePromptResource,
@@ -72,6 +87,10 @@ public class KnowledgeBaseQueryService {
         this.vectorService = vectorService;
         this.listService = listService;
         this.countService = countService;
+        this.ftsSearchRepository = ftsSearchRepository;
+        this.queryIntentClassifier = queryIntentClassifier;
+        this.ruleRerankService = ruleRerankService;
+        this.thresholdRelaxationPolicy = thresholdRelaxationPolicy;
         this.systemPromptTemplate = new PromptTemplate(systemPromptResource.getContentAsString(StandardCharsets.UTF_8));
         this.userPromptTemplate = new PromptTemplate(userPromptResource.getContentAsString(StandardCharsets.UTF_8));
         this.rewritePromptTemplate = new PromptTemplate(rewritePromptResource.getContentAsString(StandardCharsets.UTF_8));
@@ -146,16 +165,119 @@ public class KnowledgeBaseQueryService {
     }
 
     public QueryResponse queryKnowledgeBase(QueryRequest request) {
+        String question = normalizeQuestion(request.question());
+        QueryContext queryContext = buildQueryContext(question);
+        ThresholdRelaxationPolicy.RelaxationState relaxState = thresholdRelaxationPolicy.initial(
+            queryContext.searchParams().minScore(),
+            0.12,
+            queryContext.searchParams().topK(),
+            queryContext.searchParams().topK()
+        );
+        QueryIntentClassifier.QueryIntent intent = queryIntentClassifier.classify(question);
+        List<HybridHitDTO> hybridHits = List.of();
+        String mode = "QUERY_NO_EMBEDDING";
+        boolean lowConfidence = false;
+
+        while (!relaxState.stop()) {
+            try {
+                List<Document> vectorDocs = vectorService.similaritySearch(
+                    queryContext.candidateQueries().getFirst(),
+                    request.knowledgeBaseIds(),
+                    relaxState.topKVec(),
+                    relaxState.vecMinScore()
+                );
+                List<HybridHitDTO> vectorHits = toVectorHits(vectorDocs, request.knowledgeBaseIds());
+                List<HybridHitDTO> ftsHits = ftsSearchRepository.search(
+                    question,
+                    request.knowledgeBaseIds(),
+                    relaxState.topKFts(),
+                    relaxState.ftsMinRank()
+                );
+
+                if (vectorHits.isEmpty()) {
+                    mode = "QUERY_NO_EMBEDDING";
+                    hybridHits = ruleRerankService.rerank(ftsHits, intent);
+                } else {
+                    mode = "QUERY_WITH_EMBEDDING";
+                    hybridHits = mergeAndRerank(vectorHits, ftsHits, intent);
+                }
+            } catch (Exception e) {
+                log.warn("向量检索不可用(round={})，回退 FTS: {}", relaxState.round(), e.getMessage());
+                mode = "QUERY_NO_EMBEDDING";
+                hybridHits = ruleRerankService.rerank(ftsSearchRepository.search(
+                    question, request.knowledgeBaseIds(), relaxState.topKFts(), relaxState.ftsMinRank()
+                ), intent);
+            }
+
+            relaxState = thresholdRelaxationPolicy.next(relaxState, hybridHits.size());
+            log.debug("松弛策略 round={}, hits={}, stop={}, lowConf={}",
+                relaxState.round(), hybridHits.size(), relaxState.stop(), relaxState.lowConfidence());
+        }
+
+        lowConfidence = relaxState.lowConfidence();
+
         String answer = answerQuestion(request.knowledgeBaseIds(), request.question());
 
-        // 获取知识库名称（多个知识库用逗号分隔）
         List<String> kbNames = listService.getKnowledgeBaseNames(request.knowledgeBaseIds());
         String kbNamesStr = String.join("、", kbNames);
 
-        // 使用第一个知识库ID作为主要标识（兼容前端）
         Long primaryKbId = request.knowledgeBaseIds().getFirst();
 
-        return new QueryResponse(answer, primaryKbId, kbNamesStr);
+        HybridMetaDTO meta = new HybridMetaDTO(
+            relaxState.round(),
+            relaxState.vecMinScore(),
+            relaxState.ftsMinRank(),
+            intent.semanticWeight(),
+            intent.keywordWeight(),
+            lowConfidence
+        );
+        return QueryResponse.withSearch(answer, primaryKbId, kbNamesStr, mode, hybridHits, meta);
+    }
+
+    private List<HybridHitDTO> toVectorHits(List<Document> docs, List<Long> knowledgeBaseIds) {
+        if (docs == null || docs.isEmpty()) {
+            return List.of();
+        }
+        Long fallbackKb = (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) ? 0L : knowledgeBaseIds.getFirst();
+        return docs.stream()
+            .map(doc -> {
+                Object kbMeta = doc.getMetadata().get("kb_id");
+                Long kbId = fallbackKb;
+                if (kbMeta != null) {
+                    try {
+                        kbId = Long.parseLong(kbMeta.toString());
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                String highlight = doc.getText() == null ? "" : truncate(doc.getText());
+                Object chunkMeta = doc.getMetadata().get("id");
+                String chunkId = chunkMeta == null ? String.valueOf(highlight.hashCode()) : chunkMeta.toString();
+                return new HybridHitDTO(chunkId, kbId, "vector", 0.80, highlight, "向量相似度命中");
+            })
+            .toList();
+    }
+
+    private List<HybridHitDTO> mergeAndRerank(List<HybridHitDTO> vectorHits, List<HybridHitDTO> ftsHits, QueryIntentClassifier.QueryIntent intent) {
+        List<HybridHitDTO> merged = new ArrayList<>();
+        merged.addAll(vectorHits);
+        merged.addAll(ftsHits);
+
+        Set<String> seen = new HashSet<>();
+        List<HybridHitDTO> deduped = merged.stream()
+            .filter(hit -> seen.add(hit.chunkId() + ":" + hit.source()))
+            .toList();
+
+        return ruleRerankService.rerank(deduped, intent)
+            .stream()
+            .sorted(Comparator.comparingDouble(HybridHitDTO::score).reversed())
+            .toList();
+    }
+
+    private String truncate(String text) {
+        if (text.length() <= 240) {
+            return text;
+        }
+        return text.substring(0, 240) + "...";
     }
 
     public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question) {
@@ -304,7 +426,13 @@ public class KnowledgeBaseQueryService {
                 return false;
             }
             String compact = question.trim();
-            return SHORT_TOKEN_PATTERN.matcher(compact).matches();
+            if (!SHORT_TOKEN_PATTERN.matcher(compact).matches()) {
+                return false;
+            }
+            if (CJK_CHAR.matcher(compact).find()) {
+                return compact.length() <= CJK_SHORT_TOKEN_MAX;
+            }
+            return true;
         }
 
         private String normalizeAnswer(String answer) {
