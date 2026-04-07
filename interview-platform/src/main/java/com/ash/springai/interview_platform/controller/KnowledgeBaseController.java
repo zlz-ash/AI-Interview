@@ -22,6 +22,7 @@ import com.ash.springai.interview_platform.service.KnowledgeBaseUploadService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseQueryService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseListService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseDeleteService;
+import com.ash.springai.interview_platform.service.KnowledgeBaseChunkBrowseService;
 import com.ash.springai.interview_platform.common.Result;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseListItemDTO;
 import com.ash.springai.interview_platform.enums.VectorStatus;
@@ -29,6 +30,7 @@ import com.ash.springai.interview_platform.annotation.RateLimit;
 import com.ash.springai.interview_platform.Entity.QueryRequest;
 import com.ash.springai.interview_platform.Entity.QueryResponse;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseStatsDTO;
+import com.ash.springai.interview_platform.Entity.DocumentChunksResponse;
 
 import reactor.core.publisher.Flux;
 
@@ -46,6 +48,7 @@ public class KnowledgeBaseController {
     private final KnowledgeBaseQueryService queryService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseDeleteService deleteService;
+    private final KnowledgeBaseChunkBrowseService chunkBrowseService;
 
     @GetMapping("/api/knowledgebase/list")
     public Result<List<KnowledgeBaseListItemDTO>> getAllKnowledgeBases(
@@ -71,6 +74,17 @@ public class KnowledgeBaseController {
                 .orElse(Result.error("知识库不存在"));
     }
 
+    @GetMapping("/api/knowledgebase/documents/{documentId}/chunks")
+    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 30)
+    public Result<DocumentChunksResponse> getDocumentChunks(
+        @PathVariable Long documentId,
+        @RequestParam(value = "page", defaultValue = "1") int page,
+        @RequestParam(value = "pageSize", defaultValue = "10") int pageSize,
+        @RequestParam(value = "selectedChunkId", required = false) String selectedChunkId
+    ) {
+        return Result.success(chunkBrowseService.getDocumentChunks(documentId, page, pageSize, selectedChunkId));
+    }
+
     @DeleteMapping("/api/knowledgebase/{id}")
     public Result<Void> deleteKnowledgeBase(@PathVariable Long id) {
         deleteService.deleteKnowledgeBase(id);
@@ -88,7 +102,10 @@ public class KnowledgeBaseController {
     public Flux<String> queryKnowledgeBaseStream(@Valid @RequestBody QueryRequest request) {
         log.debug("收到知识库流式查询请求: kbIds={}, question={}, 线程: {} (虚拟线程: {})",
             request.knowledgeBaseIds(), request.question(), Thread.currentThread(), Thread.currentThread().isVirtual());
-        return queryService.answerQuestionStream(request.knowledgeBaseIds(), request.question());
+        return Flux.concat(
+            queryService.answerQuestionStream(request.knowledgeBaseIds(), request.question()),
+            Flux.just("[DONE]")
+        );
     }
 
     @GetMapping("/api/knowledgebase/categories")

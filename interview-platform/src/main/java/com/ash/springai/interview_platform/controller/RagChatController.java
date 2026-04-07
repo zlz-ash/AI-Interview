@@ -89,19 +89,21 @@ public class RagChatController {
         // 2. 获取流式响应
         StringBuilder fullContent = new StringBuilder();
 
-        return sessionService.getStreamAnswer(sessionId, request.question())
+        Flux<ServerSentEvent<String>> contentEvents = sessionService.getStreamAnswer(sessionId, request.question())
             .doOnNext(fullContent::append)
-            // 使用 ServerSentEvent 包装，转义换行符避免破坏 SSE 格式
             .map(chunk -> ServerSentEvent.<String>builder()
                 .data(chunk.replace("\n", "\\n").replace("\r", "\\r"))
-                .build())
+                .build());
+
+        Flux<ServerSentEvent<String>> doneSignal = Flux.just(
+            ServerSentEvent.<String>builder().data("[DONE]").build());
+
+        return Flux.concat(contentEvents, doneSignal)
             .doOnComplete(() -> {
-                // 3. 流式完成后更新消息内容
                 sessionService.completeStreamMessage(messageId, fullContent.toString());
                 log.info("RAG 聊天流式完成: sessionId={}, messageId={}", sessionId, messageId);
             })
             .doOnError(e -> {
-                // 错误时也保存已接收的内容
                 String content = !fullContent.isEmpty()
                     ? fullContent.toString()
                     : "【错误】回答生成失败：" + e.getMessage();
