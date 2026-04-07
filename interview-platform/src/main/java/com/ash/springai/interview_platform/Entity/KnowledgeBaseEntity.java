@@ -1,5 +1,6 @@
 package com.ash.springai.interview_platform.Entity;
 
+import com.ash.springai.interview_platform.enums.DocumentType;
 import com.ash.springai.interview_platform.enums.VectorStatus;
 
 import jakarta.persistence.*;
@@ -56,6 +57,16 @@ public class KnowledgeBaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private VectorStatus vectorStatus = VectorStatus.PENDING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32)
+    private DocumentType documentType;
+
+    @Column(length = 32)
+    private String ingestVersion;
+
+    @Column(length = 32)
+    private String ingestStatus;
 
     @Column(length = 500)
     private String vectorError;

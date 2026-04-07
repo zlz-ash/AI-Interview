@@ -75,6 +75,14 @@ public class FileValidationService {
                lowerFileName.endsWith(".mdown");
     }
 
+    public boolean isExcelExtension(String fileName) {
+        if (fileName == null) {
+            return false;
+        }
+        String lower = fileName.toLowerCase();
+        return lower.endsWith(".xlsx") || lower.endsWith(".xls");
+    }
+
     public boolean isKnowledgeBaseMimeType(String contentType) {
         if (contentType == null) {
             return false;
@@ -88,6 +96,8 @@ public class FileValidationService {
                lowerContentType.contains("text/markdown") ||
                lowerContentType.contains("text/x-markdown") ||
                lowerContentType.contains("text/x-web-markdown") ||
-               lowerContentType.contains("application/rtf");
+               lowerContentType.contains("application/rtf") ||
+               lowerContentType.contains("spreadsheetml") ||
+               lowerContentType.contains("ms-excel");
     }
 }

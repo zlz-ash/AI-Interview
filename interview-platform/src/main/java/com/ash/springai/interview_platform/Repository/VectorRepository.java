@@ -47,5 +47,15 @@ public class VectorRepository {
             // 抛出异常以触发事务回滚
             throw new RuntimeException("删除向量数据失败", e);
         }
-    }    
+    }
+
+    public long countByKnowledgeBaseId(Long knowledgeBaseId) {
+        String sql = """
+            SELECT COUNT(*) FROM vector_store
+            WHERE metadata->>'kb_id' = ?
+               OR (metadata->>'kb_id_long' IS NOT NULL AND (metadata->>'kb_id_long')::bigint = ?)
+            """;
+        Long n = jdbcTemplate.queryForObject(sql, Long.class, knowledgeBaseId.toString(), knowledgeBaseId);
+        return n == null ? 0L : n;
+    }
 }

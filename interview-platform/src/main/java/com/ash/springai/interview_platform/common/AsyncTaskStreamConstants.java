@@ -10,6 +10,14 @@ public final class AsyncTaskStreamConstants {
 
     public static final String FIELD_CONTENT = "content";
 
+    public static final String FIELD_STORAGE_KEY = "storageKey";
+
+    public static final String FIELD_ORIGINAL_FILENAME = "originalFilename";
+
+    public static final String FIELD_CONTENT_TYPE = "contentType";
+
+    public static final String FIELD_INGEST_VERSION = "ingestVersion";
+
     public static final int MAX_RETRY_COUNT = 3;
 
     public static final int BATCH_SIZE = 10;

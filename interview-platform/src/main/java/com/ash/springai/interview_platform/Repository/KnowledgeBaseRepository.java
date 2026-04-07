@@ -1,5 +1,6 @@
 package com.ash.springai.interview_platform.Repository;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -48,5 +49,12 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
     long countByVectorStatus(VectorStatus vectorStatus);
 
     List<KnowledgeBaseEntity> findByVectorStatusOrderByUploadedAtDesc(VectorStatus vectorStatus);
+
+    List<KnowledgeBaseEntity> findAllByOrderByIdAsc(Pageable pageable);
+
+    /**
+     * 未写入 ingestVersion 的记录视为待迁移/遗留数据（v2 流水线入库会写入版本号）。
+     */
+    List<KnowledgeBaseEntity> findByIngestVersionIsNullOrderByIdAsc(Pageable pageable);
 }
 
