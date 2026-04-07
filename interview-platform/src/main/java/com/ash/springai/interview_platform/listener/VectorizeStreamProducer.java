@@ -18,15 +18,27 @@ public class VectorizeStreamProducer extends AbstractStreamProducer<VectorizeStr
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
 
-    record VectorizeTaskPayload(Long kbId, String content) {}
+    record VectorizeTaskPayload(
+        Long kbId,
+        String storageKey,
+        String originalFilename,
+        String contentType,
+        String ingestVersion
+    ) {}
 
     public VectorizeStreamProducer(RedisService redisService, KnowledgeBaseRepository knowledgeBaseRepository) {
         super(redisService);
         this.knowledgeBaseRepository = knowledgeBaseRepository;
     }
 
-    public void sendVectorizeTask(Long kbId, String content) {
-        sendTask(new VectorizeTaskPayload(kbId, content));
+    public void sendVectorizeTask(
+        Long kbId,
+        String storageKey,
+        String originalFilename,
+        String contentType,
+        String ingestVersion
+    ) {
+        sendTask(new VectorizeTaskPayload(kbId, storageKey, originalFilename, contentType, ingestVersion));
     }
 
     @Override
@@ -43,9 +55,16 @@ public class VectorizeStreamProducer extends AbstractStreamProducer<VectorizeStr
     protected Map<String, String> buildMessage(VectorizeTaskPayload payload) {
         return Map.of(
             AsyncTaskStreamConstants.FIELD_KB_ID, payload.kbId().toString(),
-            AsyncTaskStreamConstants.FIELD_CONTENT, payload.content(),
+            AsyncTaskStreamConstants.FIELD_STORAGE_KEY, nullToEmpty(payload.storageKey()),
+            AsyncTaskStreamConstants.FIELD_ORIGINAL_FILENAME, nullToEmpty(payload.originalFilename()),
+            AsyncTaskStreamConstants.FIELD_CONTENT_TYPE, nullToEmpty(payload.contentType()),
+            AsyncTaskStreamConstants.FIELD_INGEST_VERSION, nullToEmpty(payload.ingestVersion()),
             AsyncTaskStreamConstants.FIELD_RETRY_COUNT, "0"
         );
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     @Override
@@ -61,6 +80,7 @@ public class VectorizeStreamProducer extends AbstractStreamProducer<VectorizeStr
     private void updateVectorStatus(Long kbId, VectorStatus status, String error) {
         knowledgeBaseRepository.findById(kbId).ifPresent(kb -> {
             kb.setVectorStatus(status);
+            kb.setIngestStatus("FAILED");
             if (error != null) {
                 kb.setVectorError(error.length() > 500 ? error.substring(0, 500) : error);
             }

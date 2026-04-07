@@ -10,6 +10,7 @@ import com.ash.springai.interview_platform.Repository.KnowledgeBaseRepository;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
 import com.ash.springai.interview_platform.exception.BusinessException;
 import com.ash.springai.interview_platform.exception.ErrorCode;
+import com.ash.springai.interview_platform.enums.DocumentType;
 import com.ash.springai.interview_platform.enums.VectorStatus;
 
 import lombok.RequiredArgsConstructor;
@@ -48,7 +49,8 @@ public class KnowledgeBasePersistenceService {
 
     @Transactional(rollbackFor = Exception.class)
     public KnowledgeBaseEntity saveKnowledgeBase(MultipartFile file, String name, String category,
-                                                  String storageKey, String storageUrl, String fileHash) {
+                                                  String storageKey, String storageUrl, String fileHash,
+                                                  DocumentType documentType, String ingestVersion) {
         try {
             KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
             kb.setFileHash(fileHash);
@@ -59,6 +61,9 @@ public class KnowledgeBasePersistenceService {
             kb.setContentType(file.getContentType());
             kb.setStorageKey(storageKey);
             kb.setStorageUrl(storageUrl);
+            kb.setDocumentType(documentType);
+            kb.setIngestVersion(ingestVersion);
+            kb.setIngestStatus("PENDING");
 
             KnowledgeBaseEntity saved = knowledgeBaseRepository.save(kb);
             log.info("知识库已保存: id={}, name={}, category={}, hash={}", saved.getId(), saved.getName(), saved.getCategory(), fileHash);
@@ -76,6 +81,7 @@ public class KnowledgeBasePersistenceService {
         
         kb.setVectorStatus(VectorStatus.PENDING);
         kb.setVectorError(null);
+        kb.setIngestStatus("PENDING");
         knowledgeBaseRepository.save(kb);
         
         log.info("知识库向量化状态已更新为 PENDING: kbId={}", kbId);

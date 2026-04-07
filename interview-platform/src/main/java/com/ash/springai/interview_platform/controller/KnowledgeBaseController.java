@@ -18,11 +18,16 @@ import org.springframework.http.HttpHeaders;
 
 import jakarta.validation.Valid;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+
 import com.ash.springai.interview_platform.service.KnowledgeBaseUploadService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseQueryService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseListService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseDeleteService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseChunkBrowseService;
+import com.ash.springai.interview_platform.service.LegacyKnowledgeBaseCleanupService;
+import com.ash.springai.interview_platform.Entity.LegacyCleanupResultDTO;
 import com.ash.springai.interview_platform.common.Result;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseListItemDTO;
 import com.ash.springai.interview_platform.enums.VectorStatus;
@@ -49,6 +54,7 @@ public class KnowledgeBaseController {
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseDeleteService deleteService;
     private final KnowledgeBaseChunkBrowseService chunkBrowseService;
+    private final LegacyKnowledgeBaseCleanupService legacyCleanupService;
 
     @GetMapping("/api/knowledgebase/list")
     public Result<List<KnowledgeBaseListItemDTO>> getAllKnowledgeBases(
@@ -171,6 +177,18 @@ public class KnowledgeBaseController {
     public Result<Void> revectorize(@PathVariable Long id) {
         uploadService.revectorize(id);
         return Result.success(null);
-    }   
+    }
+
+    @PostMapping("/api/knowledgebase/legacy/cleanup")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<LegacyCleanupResultDTO> cleanupLegacy(
+        @RequestParam(defaultValue = "50") int batchSize,
+        Authentication authentication
+    ) {
+        String operator = authentication != null && authentication.getName() != null
+            ? authentication.getName()
+            : "unknown";
+        return Result.success(legacyCleanupService.cleanupLegacyKnowledgeBases(batchSize, operator));
+    }
 
 }

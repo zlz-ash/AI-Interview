@@ -8,9 +8,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 
+import com.ash.springai.interview_platform.Repository.KnowledgeBaseRepository;
 import com.ash.springai.interview_platform.Repository.VectorRepository;
+import com.ash.springai.interview_platform.Entity.IngestChunkDTO;
+import com.ash.springai.interview_platform.common.AsyncTaskStreamConstants;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -20,14 +26,20 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class KnowledgeBaseVectorService {
 
-    private static final int MAX_BATCH_SIZE = 10;
+    private static final int MAX_BATCH_SIZE = AsyncTaskStreamConstants.BATCH_SIZE;
     private final VectorStore vectorStore;
     private final TextSplitter textSplitter;
     private final VectorRepository vectorRepository;
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
 
-    public KnowledgeBaseVectorService(VectorStore vectorStore, VectorRepository vectorRepository) {
+    public KnowledgeBaseVectorService(
+        VectorStore vectorStore,
+        VectorRepository vectorRepository,
+        KnowledgeBaseRepository knowledgeBaseRepository
+    ) {
         this.vectorStore = vectorStore;
         this.vectorRepository = vectorRepository;
+        this.knowledgeBaseRepository = knowledgeBaseRepository;
         // 使用TokenTextSplitter，每个chunk约500 tokens，重叠50 tokens
         this.textSplitter = new TokenTextSplitter();
     }
@@ -67,6 +79,69 @@ public class KnowledgeBaseVectorService {
             log.error("向量化知识库失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
             throw new RuntimeException("向量化知识库失败: " + e.getMessage(), e);
         }
+    }
+
+    @Transactional
+    public void vectorizeAndStoreChunks(Long knowledgeBaseId, List<IngestChunkDTO> chunks) {
+        log.info("开始向量化知识库(分块 DTO): kbId={}, chunks={}", knowledgeBaseId,
+            chunks == null ? 0 : chunks.size());
+        if (chunks == null || chunks.isEmpty()) {
+            throw new RuntimeException("无可用文本块");
+        }
+        try {
+            deleteByKnowledgeBaseId(knowledgeBaseId);
+
+            List<Document> documents = new ArrayList<>();
+            for (IngestChunkDTO c : chunks) {
+                Map<String, Object> meta = new HashMap<>();
+                if (c.metadata() != null) {
+                    meta.putAll(normalizeMetadata(c.metadata()));
+                }
+                meta.putIfAbsent("kb_id", knowledgeBaseId.toString());
+                documents.add(new Document(c.content(), meta));
+            }
+
+            int totalChunks = documents.size();
+            int batchCount = (totalChunks + MAX_BATCH_SIZE - 1) / MAX_BATCH_SIZE;
+            for (int i = 0; i < batchCount; i++) {
+                int start = i * MAX_BATCH_SIZE;
+                int end = Math.min(start + MAX_BATCH_SIZE, totalChunks);
+                vectorStore.add(documents.subList(start, end));
+            }
+
+            knowledgeBaseRepository.findById(knowledgeBaseId).ifPresent(kb -> {
+                kb.setChunkCount(totalChunks);
+                knowledgeBaseRepository.save(kb);
+            });
+
+            log.info("知识库分块向量化完成: kbId={}, chunks={}", knowledgeBaseId, totalChunks);
+        } catch (Exception e) {
+            log.error("向量化知识库失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
+            throw new RuntimeException("向量化知识库失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 将 metadata 中的值转为 JSON / 标量，便于写入 vector_store。
+     */
+    private static Map<String, Object> normalizeMetadata(Map<String, Object> raw) {
+        Map<String, Object> out = new HashMap<>();
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
+            Object v = e.getValue();
+            if (v == null) {
+                continue;
+            }
+            if (v instanceof List<?> list) {
+                out.put(e.getKey(), list.stream().map(Object::toString).toList());
+            } else if (v instanceof Map<?, ?> map) {
+                out.put(e.getKey(), map.toString());
+            } else if (v instanceof Number || v instanceof Boolean) {
+                out.put(e.getKey(), v);
+            } else {
+                out.put(e.getKey(), v.toString());
+            }
+        }
+        return out;
     }
 
     public List<Document> similaritySearch(String query, List<Long> knowledgeBaseIds, int topK, double minScore) {
@@ -163,9 +238,7 @@ public class KnowledgeBaseVectorService {
             vectorRepository.deleteByKnowledgeBaseId(knowledgeBaseId);
         } catch (Exception e) {
             log.error("删除向量数据失败: kbId={}, error={}", knowledgeBaseId, e.getMessage(), e);
-            // 不抛出异常，允许继续执行其他删除操作
-            // 如果确实需要严格保证，可以取消下面的注释
-            // throw new RuntimeException("删除向量数据失败: " + e.getMessage(), e);
+            throw new RuntimeException("删除向量数据失败: " + e.getMessage(), e);
         }
     }
 

@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.ash.springai.interview_platform.Repository.KnowledgeBaseRepository;
+import com.ash.springai.interview_platform.config.IngestProperties;
 import com.ash.springai.interview_platform.listener.VectorizeStreamProducer;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
 import com.ash.springai.interview_platform.exception.BusinessException;
@@ -28,6 +29,8 @@ public class KnowledgeBaseUploadService {
     private final FileValidationService fileValidationService;
     private final FileHashService fileHashService;
     private final VectorizeStreamProducer vectorizeStreamProducer;
+    private final DocumentTypeRouterService documentTypeRouterService;
+    private final IngestProperties ingestProperties;
 
     private static final long MAX_FILE_SIZE = 50 * 1024 * 1024;
 
@@ -57,9 +60,19 @@ public class KnowledgeBaseUploadService {
         String fileUrl = storageService.getFileUrl(fileKey);
         log.info("知识库已存储到RustFS: {}", fileKey);
 
-        KnowledgeBaseEntity savedKb = persistenceService.saveKnowledgeBase(file, name, category, fileKey, fileUrl, fileHash);
+        var docType = documentTypeRouterService.route(contentType, fileName, content);
+        KnowledgeBaseEntity savedKb = persistenceService.saveKnowledgeBase(
+            file, name, category, fileKey, fileUrl, fileHash,
+            docType, ingestProperties.getVersion()
+        );
 
-        vectorizeStreamProducer.sendVectorizeTask(savedKb.getId(), content);
+        vectorizeStreamProducer.sendVectorizeTask(
+            savedKb.getId(),
+            fileKey,
+            fileName,
+            contentType,
+            ingestProperties.getVersion()
+        );
 
         log.info("知识库上传完成，向量化任务已入队: {}, kbId={}", fileName, savedKb.getId());
 
@@ -86,8 +99,8 @@ public class KnowledgeBaseUploadService {
             contentType,
             fileName,
             fileValidationService::isKnowledgeBaseMimeType,
-            fileValidationService::isMarkdownExtension,
-            "不支持的文件类型: " + contentType + "，支持的类型：PDF、DOCX、DOC、TXT、MD等"
+            fn -> fileValidationService.isMarkdownExtension(fn) || fileValidationService.isExcelExtension(fn),
+            "不支持的文件类型: " + contentType + "，支持的类型：PDF、DOCX、DOC、TXT、MD、XLSX 等"
         );
     }
 
@@ -107,7 +120,13 @@ public class KnowledgeBaseUploadService {
         persistenceService.updateVectorStatusToPending(kbId);
 
         // 3. 发送向量化任务到 Stream
-        vectorizeStreamProducer.sendVectorizeTask(kbId, content);
+        vectorizeStreamProducer.sendVectorizeTask(
+            kbId,
+            kb.getStorageKey(),
+            kb.getOriginalFilename(),
+            kb.getContentType(),
+            ingestProperties.getVersion()
+        );
 
         log.info("重新向量化任务已发送: kbId={}", kbId);
     }
