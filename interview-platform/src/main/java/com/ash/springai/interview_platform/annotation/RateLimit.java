@@ -4,9 +4,11 @@ import java.lang.annotation.Target;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Repeatable;
 
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
+@Repeatable(RateLimit.Container.class)
 public @interface RateLimit {
     
     enum Dimension {
@@ -24,7 +26,7 @@ public @interface RateLimit {
         USER
     }
 
-    Dimension[] dimensions() default {Dimension.GLOBAL};
+    Dimension dimension() default Dimension.GLOBAL;
 
     double count();
 
@@ -38,5 +40,11 @@ public @interface RateLimit {
 
     enum TimeUnit {
         MILLISECONDS, SECONDS, MINUTES, HOURS, DAYS
+    }
+
+    @Target(ElementType.METHOD)
+    @Retention(RetentionPolicy.RUNTIME)
+    @interface Container{
+        RateLimit[] value();
     }
 }
