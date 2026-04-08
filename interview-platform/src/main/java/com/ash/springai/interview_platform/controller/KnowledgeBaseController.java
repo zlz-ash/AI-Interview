@@ -81,7 +81,10 @@ public class KnowledgeBaseController {
     }
 
     @GetMapping("/api/knowledgebase/documents/{documentId}/chunks")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 30)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30),
+            @RateLimit(dimension = RateLimit.Dimension.IP, count = 30)
+    })
     public Result<DocumentChunksResponse> getDocumentChunks(
         @PathVariable Long documentId,
         @RequestParam(value = "page", defaultValue = "1") int page,
@@ -98,13 +101,19 @@ public class KnowledgeBaseController {
     }
 
     @PostMapping("/api/knowledgebase/query")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 10)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10),
+            @RateLimit(dimension = RateLimit.Dimension.IP, count = 10)
+    })
     public Result<QueryResponse> queryKnowledgeBase(@Valid @RequestBody QueryRequest request) {
         return Result.success(queryService.queryKnowledgeBase(request));
     }
 
     @PostMapping(value = "/api/knowledgebase/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 5)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5),
+            @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
+    })
     public Flux<String> queryKnowledgeBaseStream(@Valid @RequestBody QueryRequest request) {
         log.debug("收到知识库流式查询请求: kbIds={}, question={}, 线程: {} (虚拟线程: {})",
             request.knowledgeBaseIds(), request.question(), Thread.currentThread(), Thread.currentThread().isVirtual());
@@ -136,7 +145,10 @@ public class KnowledgeBaseController {
     }
 
     @PostMapping(value = "/api/knowledgebase/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 3)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 3),
+            @RateLimit(dimension = RateLimit.Dimension.IP, count = 3)
+    })
     public Result<Map<String, Object>> uploadKnowledgeBase(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "name", required = false) String name,
@@ -173,7 +185,10 @@ public class KnowledgeBaseController {
     }
 
     @PostMapping("/api/knowledgebase/{id}/revectorize")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 2)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2),
+            @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
+    })
     public Result<Void> revectorize(@PathVariable Long id) {
         uploadService.revectorize(id);
         return Result.success(null);

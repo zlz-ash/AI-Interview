@@ -16,7 +16,6 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import java.lang.reflect.Method;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.UUID;
 
 import java.nio.charset.StandardCharsets;
@@ -28,6 +27,7 @@ import lombok.RequiredArgsConstructor;
 import com.ash.springai.interview_platform.annotation.RateLimit;
 import com.ash.springai.interview_platform.exception.RateLimitExceededException;
 
+import java.util.Collections;
 
 @Slf4j
 @Aspect
@@ -39,6 +39,7 @@ public class RateLimitAspect {
 
     private static String LUA_SCRIPT;
     private String luaScriptSha;
+    private RScript rScript;
 
     static {
         try {
@@ -51,55 +52,77 @@ public class RateLimitAspect {
 
     @jakarta.annotation.PostConstruct
     public void init() {
-        this.luaScriptSha = redissonClient.getScript(StringCodec.INSTANCE).scriptLoad(LUA_SCRIPT);
+        rScript = redissonClient.getScript(StringCodec.INSTANCE);
+        loadScript();
+    }
+
+    private void loadScript() {
+        this.luaScriptSha = rScript.scriptLoad(LUA_SCRIPT);
         log.info("限流 Lua 脚本加载完成, SHA1: {}", luaScriptSha);
     }
 
-    @Around("@annotation(rateLimit)")
-    public Object around(ProceedingJoinPoint joinPoint, RateLimit rateLimit) throws Throwable {
+    @Around("@annotation(com.ash.springai.interview_platform.annotation.RateLimit) || " + 
+            "@annotation(com.ash.springai.interview_platform.annotation.RateLimit.Container)"
+    )
+    public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         Method method = signature.getMethod();
         String className = method.getDeclaringClass().getSimpleName();
         String methodName = method.getName();
 
-        // 1. 计算时间窗口（毫秒）
-        long intervalMs = calculateIntervalMs(rateLimit.interval(), rateLimit.timeUnit());
+        RateLimit[] rules = method.getAnnotationsByType(RateLimit.class);
+        long nowMs = System.currentTimeMillis();
+        String requestId = UUID.randomUUID().toString();
 
-        // 2. 根据配置维度动态生成 Redis Keys
-        List<String> keys = generateKeys(className, methodName, rateLimit.dimensions());
+        for(RateLimit rule : rules){
+            long intervalMs = calculateIntervalMs(rule.interval(), rule.timeUnit());
+            String key = generateKeys(className,methodName,rule.dimension());
 
-        // 3. 调用 Lua 脚本执行原子限流
-        // 使用 StringCodec 确保参数正确传递为字符串
-        RScript script = redissonClient.getScript(StringCodec.INSTANCE);
+            Long result = executeRateLimitScript(key, nowMs, requestId, intervalMs, rule.count());
 
-        // 准备参数
-        List<Object> keysList = new ArrayList<>(keys);
-        Object[] args = {
-                String.valueOf(System.currentTimeMillis()), // ARGV[1]: 当前时间戳
-                String.valueOf(1),                          // ARGV[2]: 申请令牌数（默认1个）
-                String.valueOf(intervalMs),                 // ARGV[3]: 时间窗口
-                String.valueOf(rateLimit.count()),          // ARGV[4]: 最大令牌数
-                UUID.randomUUID().toString()               // ARGV[5]: 请求唯一标识
-        };
-
-        Object resultObj = script.evalSha(
-                RScript.Mode.READ_WRITE,
-                luaScriptSha,
-                RScript.ReturnType.VALUE,
-                keysList,
-                args
-        );
-
-        // 将结果转换为 Long
-        Long result = convertToLong(resultObj);
-
-        // 4. 处理限流结果
-        if (result == null || result == 0) {
-            return handleRateLimitExceeded(joinPoint, rateLimit, keys);
+            if(result == null || result == 0){
+                return handleRateLimitExceeded(joinPoint,rule,key);
+            }
         }
 
         // 5. 执行原方法
         return joinPoint.proceed();
+    }
+
+    private Long executeRateLimitScript(String key, long nowMs, String requestId, long intervalMs, double count) {
+        List<Object> keysList = Collections.singletonList(key);
+        Object[] args = {
+                String.valueOf(nowMs),
+                String.valueOf(1),
+                String.valueOf(intervalMs),
+                String.valueOf(count),
+                requestId
+        };
+
+        try {
+            Object resultObj = rScript.evalSha(
+                    RScript.Mode.READ_WRITE,
+                    luaScriptSha,
+                    RScript.ReturnType.VALUE,
+                    keysList,
+                    args
+            );
+            return convertToLong(resultObj);
+        } catch (org.redisson.client.RedisException e) {
+            // Redis 重启后脚本缓存丢失，重新加载并重试
+            if (e.getMessage() != null && e.getMessage().contains("NOSCRIPT")) {
+                loadScript();
+                Object resultObj = rScript.evalSha(
+                        RScript.Mode.READ_WRITE,
+                        luaScriptSha,
+                        RScript.ReturnType.VALUE,
+                        keysList,
+                        args
+                );
+                return convertToLong(resultObj);
+            }
+            throw e;
+        }
     }
 
     private long calculateIntervalMs(long interval, RateLimit.TimeUnit unit) {
@@ -113,48 +136,36 @@ public class RateLimitAspect {
     }
 
     private Long convertToLong(Object obj) {
-        if (obj == null) {
-            return null;
+        if (obj instanceof Number n) {
+            return n.longValue();
         }
-        if (obj instanceof Long) {
-            return (Long) obj;
-        } else if (obj instanceof Integer) {
-            return ((Integer) obj).longValue();
-        } else if (obj instanceof Short) {
-            return ((Short) obj).longValue();
-        } else if (obj instanceof Byte) {
-            return ((Byte) obj).longValue();
-        } else if (obj instanceof String) {
+        if (obj instanceof String s) {
             try {
-                return Long.parseLong((String) obj);
+                return Long.parseLong(s);
             } catch (NumberFormatException e) {
                 log.warn("无法将字符串转换为Long: {}", obj);
                 return null;
             }
         }
-        log.warn("不支持的对象类型转换为Long: {}", obj.getClass().getName());
+        log.warn("不支持的对象类型转换为Long: {}", obj != null ? obj.getClass().getName() : "null");
         return null;
     }
+    
 
-    private List<String> generateKeys(String className, String methodName, RateLimit.Dimension[] dimensions) {
-        List<String> keys = new ArrayList<>();
+    private String generateKeys(String className, String methodName, RateLimit.Dimension dimension) {
         // 使用 {} 包含类名和方法名作为 Hash Tag，确保该方法的所有限流 Key 落在同一个 Redis Slot
         // 从而适配 Redis Cluster 模式
         String hashTag = "{" + className + ":" + methodName + "}";
         String keyPrefix = "ratelimit:" + hashTag;
 
-        for (RateLimit.Dimension dimension : dimensions) {
-            switch (dimension) {
-                case GLOBAL -> keys.add(keyPrefix + ":global");
-                case IP -> keys.add(keyPrefix + ":ip:" + getClientIp());
-                case USER -> keys.add(keyPrefix + ":user:" + getCurrentUserId());
-            }
-        }
-
-        return keys;
+        return switch (dimension) {
+            case GLOBAL -> keyPrefix + ":global";
+            case IP -> keyPrefix + ":ip:" + getClientIp();
+            case USER -> keyPrefix + ":user:" + getCurrentUserId();
+        };
     }
 
-    private Object handleRateLimitExceeded(ProceedingJoinPoint joinPoint, RateLimit rateLimit, List<String> keys)
+    private Object handleRateLimitExceeded(ProceedingJoinPoint joinPoint, RateLimit rateLimit, String key)
             throws Throwable {
         String methodName = joinPoint.getSignature().getName();
 
@@ -181,7 +192,7 @@ public class RateLimitAspect {
 
         // 没有降级方法或降级失败，抛出限流异常
         log.debug("限流触发，拒绝请求: keys={}, count={} per {} {}",
-                keys, rateLimit.count(), rateLimit.interval(), rateLimit.timeUnit());
+                key, rateLimit.count(), rateLimit.interval(), rateLimit.timeUnit());
         throw new RateLimitExceededException("请求过于频繁，请稍后再试");
     }
 

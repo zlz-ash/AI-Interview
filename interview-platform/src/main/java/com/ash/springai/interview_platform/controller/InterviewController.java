@@ -40,7 +40,10 @@ public class InterviewController {
     private final InterviewPersistenceService persistenceService;
 
     @PostMapping("/api/interview/sessions")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 5)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5),
+            @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
+    })
     public Result<InterviewSessionDTO> createSession(@RequestBody CreateInterviewRequest request) {
         log.info("创建面试会话，题目数量: {}", request.questionCount());
         InterviewSessionDTO session = sessionService.createSession(request);
@@ -59,7 +62,9 @@ public class InterviewController {
     }
 
     @PostMapping("/api/interview/sessions/{sessionId}/answers")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL}, count = 10)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
+    })
     public Result<SubmitAnswerResponse> submitAnswer(
             @PathVariable String sessionId,
             @RequestBody Map<String, Object> body) {
@@ -104,7 +109,10 @@ public class InterviewController {
     }
 
     @PostMapping("/api/interview/sessions/{sessionId}/reevaluate")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 2)
+    @RateLimit.Container({
+            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2),
+            @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
+    })
     public Result<Void> requestReevaluation(@PathVariable String sessionId) {
         log.info("用户触发重新评估: {}", sessionId);
         sessionService.requestReevaluation(sessionId);
