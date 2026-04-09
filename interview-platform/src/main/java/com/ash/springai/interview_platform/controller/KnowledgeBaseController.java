@@ -11,6 +11,11 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.ash.springai.interview_platform.streaming.DualChannelSse;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.ResponseEntity;
@@ -55,6 +60,7 @@ public class KnowledgeBaseController {
     private final KnowledgeBaseDeleteService deleteService;
     private final KnowledgeBaseChunkBrowseService chunkBrowseService;
     private final LegacyKnowledgeBaseCleanupService legacyCleanupService;
+    private final ObjectMapper objectMapper;
 
     @GetMapping("/api/knowledgebase/list")
     public Result<List<KnowledgeBaseListItemDTO>> getAllKnowledgeBases(
@@ -114,12 +120,15 @@ public class KnowledgeBaseController {
             @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5),
             @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
     })
-    public Flux<String> queryKnowledgeBaseStream(@Valid @RequestBody QueryRequest request) {
+    public Flux<ServerSentEvent<String>> queryKnowledgeBaseStream(@Valid @RequestBody QueryRequest request) {
         log.debug("收到知识库流式查询请求: kbIds={}, question={}, 线程: {} (虚拟线程: {})",
             request.knowledgeBaseIds(), request.question(), Thread.currentThread(), Thread.currentThread().isVirtual());
         return Flux.concat(
-            queryService.answerQuestionStream(request.knowledgeBaseIds(), request.question()),
-            Flux.just("[DONE]")
+            DualChannelSse.partsToSseEvents(
+                queryService.answerQuestionStream(request.knowledgeBaseIds(), request.question()),
+                objectMapper
+            ),
+            Flux.just(ServerSentEvent.<String>builder().data("[DONE]").build())
         );
     }
 

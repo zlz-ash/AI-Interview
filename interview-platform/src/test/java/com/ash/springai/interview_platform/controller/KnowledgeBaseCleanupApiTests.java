@@ -7,6 +7,7 @@ import com.ash.springai.interview_platform.service.KnowledgeBaseListService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseQueryService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseUploadService;
 import com.ash.springai.interview_platform.service.LegacyKnowledgeBaseCleanupService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -49,7 +50,8 @@ class KnowledgeBaseCleanupApiTests {
             listService,
             deleteService,
             chunkBrowseService,
-            cleanupService
+            cleanupService,
+            new ObjectMapper()
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }

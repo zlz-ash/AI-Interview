@@ -13,7 +13,12 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import reactor.core.publisher.Flux;
+
+import com.ash.springai.interview_platform.streaming.DualChannelSse;
+import com.ash.springai.interview_platform.streaming.StreamPart;
 
 import jakarta.validation.Valid;
 
@@ -30,6 +35,7 @@ import com.ash.springai.interview_platform.service.RagChatSessionService;
 public class RagChatController {
 
     private final RagChatSessionService sessionService;
+    private final ObjectMapper objectMapper;
 
     @PostMapping("/api/rag-chat/sessions")
     public Result<SessionDTO> createSession(@Valid @RequestBody CreateSessionRequest request) {
@@ -86,26 +92,30 @@ public class RagChatController {
         // 1. 准备消息（保存用户消息，创建 AI 消息占位）
         Long messageId = sessionService.prepareStreamMessage(sessionId, request.question());
 
-        // 2. 获取流式响应
-        StringBuilder fullContent = new StringBuilder();
+        // 2. 获取流式响应（仅正文落库）
+        StringBuilder contentOnly = new StringBuilder();
 
-        Flux<ServerSentEvent<String>> contentEvents = sessionService.getStreamAnswer(sessionId, request.question())
-            .doOnNext(fullContent::append)
-            .map(chunk -> ServerSentEvent.<String>builder()
-                .data(chunk.replace("\n", "\\n").replace("\r", "\\r"))
-                .build());
+        Flux<ServerSentEvent<String>> contentEvents = DualChannelSse.partsToSseEvents(
+            sessionService.getStreamAnswer(sessionId, request.question())
+                .doOnNext(part -> {
+                    if (StreamPart.TYPE_CONTENT.equals(part.type())) {
+                        contentOnly.append(part.delta());
+                    }
+                }),
+            objectMapper
+        );
 
         Flux<ServerSentEvent<String>> doneSignal = Flux.just(
             ServerSentEvent.<String>builder().data("[DONE]").build());
 
         return Flux.concat(contentEvents, doneSignal)
             .doOnComplete(() -> {
-                sessionService.completeStreamMessage(messageId, fullContent.toString());
+                sessionService.completeStreamMessage(messageId, contentOnly.toString());
                 log.info("RAG 聊天流式完成: sessionId={}, messageId={}", sessionId, messageId);
             })
             .doOnError(e -> {
-                String content = !fullContent.isEmpty()
-                    ? fullContent.toString()
+                String content = contentOnly.length() > 0
+                    ? contentOnly.toString()
                     : "【错误】回答生成失败：" + e.getMessage();
                 sessionService.completeStreamMessage(messageId, content);
                 log.error("RAG 聊天流式错误: sessionId={}", sessionId, e);
