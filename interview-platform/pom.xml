@@ -51,6 +51,11 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-json</artifactId>
+		</dependency>
+
 		<!-- Spring Data JPA（包含 jakarta.persistence API 等） -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

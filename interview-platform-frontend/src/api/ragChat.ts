@@ -1,5 +1,7 @@
 import { request, getErrorMessage } from './request';
 import { clearAuthSession, getAccessToken } from '../auth/storage';
+import type { StreamEnvelope } from './streamTypes';
+import { parseDualChannelSseResponse } from './parseDualChannelSse';
 
 // 统一走同源 / Vite 代理，避免 CORS
 const API_BASE_URL = '';
@@ -108,12 +110,12 @@ export const ragChatApi = {
   },
 
   /**
-   * 发送消息（流式SSE）
+   * 发送消息（流式 SSE，`data:` 为 JSON：`{ type, delta }`，结束为 `[DONE]`）
    */
   async sendMessageStream(
     sessionId: number,
     question: string,
-    onMessage: (chunk: string) => void,
+    onPart: (part: StreamEnvelope) => void,
     onComplete: () => void,
     onError: (error: Error) => void
   ): Promise<void> {
@@ -139,7 +141,6 @@ export const ragChatApi = {
             window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
           }
         }
-        // 尝试解析错误响应
         try {
           const errorData = await response.json();
           if (errorData && errorData.message) {
@@ -151,120 +152,7 @@ export const ragChatApi = {
         throw new Error(`请求失败 (${response.status})`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('无法获取响应流');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      const DONE_TOKEN = '[DONE]';
-
-      // 从 SSE 事件中提取内容；返回 'DONE' 表示流结束，null 表示无内容
-      const extractEventContent = (event: string): string | null | 'DONE' => {
-        if (!event.trim()) return null;
-
-        const lines = event.split(/\r?\n/);
-        const contentParts: string[] = [];
-
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            contentParts.push(line.substring(5));
-          }
-        }
-
-        if (contentParts.length === 0) return null;
-
-        const merged = contentParts.join('')
-          .replace(/\\n/g, '\n')
-          .replace(/\\r/g, '\r');
-
-        if (merged.trim() === DONE_TOKEN) {
-          return 'DONE';
-        }
-
-        return merged;
-      };
-
-      let streamDone = false;
-
-      const finishStream = () => {
-        if (streamDone) return;
-        streamDone = true;
-        reader.cancel().catch(() => {});
-        onComplete();
-      };
-
-      const processEvent = (event: string) => {
-        if (streamDone) return;
-        const content = extractEventContent(event);
-        if (content === 'DONE') {
-          finishStream();
-          return;
-        }
-        if (content) {
-          onMessage(content);
-        }
-      };
-
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          if (buffer) {
-            processEvent(buffer);
-          }
-          if (!streamDone) finishStream();
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        while (!streamDone) {
-          buffer = buffer.replace(/^\r?\n+/, '');
-
-          const idxLf = buffer.indexOf('\n\n');
-          const idxCrlf = buffer.indexOf('\r\n\r\n');
-
-          let splitIndex = -1;
-          let splitLen = 0;
-
-          if (idxLf !== -1 && idxCrlf !== -1) {
-            if (idxCrlf < idxLf) {
-              splitIndex = idxCrlf;
-              splitLen = 4;
-            } else {
-              splitIndex = idxLf;
-              splitLen = 2;
-            }
-          } else if (idxCrlf !== -1) {
-            splitIndex = idxCrlf;
-            splitLen = 4;
-          } else if (idxLf !== -1) {
-            splitIndex = idxLf;
-            splitLen = 2;
-          }
-
-          if (splitIndex === -1) {
-            const singleLineIndex = buffer.indexOf('\n');
-            if (singleLineIndex !== -1) {
-              const line = buffer.substring(0, singleLineIndex).replace(/\r$/, '');
-              if (line.startsWith('data:')) {
-                processEvent(line);
-              }
-              buffer = buffer.substring(singleLineIndex + 1);
-              continue;
-            }
-            break;
-          }
-
-          const eventBlock = buffer.substring(0, splitIndex);
-          buffer = buffer.substring(splitIndex + splitLen);
-
-          processEvent(eventBlock);
-        }
-      }
+      await parseDualChannelSseResponse(response, onPart, onComplete, onError);
     } catch (error) {
       onError(new Error(getErrorMessage(error)));
     }

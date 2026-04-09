@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.ash.springai.interview_platform.exception.BusinessException;
 import com.ash.springai.interview_platform.exception.ErrorCode;
+import com.ash.springai.interview_platform.streaming.ChatResponseStreamMapper;
+import com.ash.springai.interview_platform.streaming.StreamPart;
 import com.ash.springai.interview_platform.Entity.HybridHitDTO;
 import com.ash.springai.interview_platform.Entity.HybridMetaDTO;
 import com.ash.springai.interview_platform.Entity.QueryRequest;
@@ -43,7 +45,8 @@ public class KnowledgeBaseQueryService {
     private static final Pattern SHORT_TOKEN_PATTERN = Pattern.compile("^[\\p{L}\\p{N}_-]{2,20}$");
     private static final Pattern CJK_CHAR = Pattern.compile("[\\u4E00-\\u9FFF\\u3400-\\u4DBF\\uF900-\\uFAFF]");
     private static final int CJK_SHORT_TOKEN_MAX = 4;
-    private static final int STREAM_PROBE_CHARS = 120;
+    /** 流式首段探测窗口：过大会拖慢首包；需覆盖常见「无结果」句式前缀 */
+    private static final int STREAM_PROBE_CHARS = 48;
 
     private final ChatClient chatClient;
     private final KnowledgeBaseVectorService vectorService;
@@ -280,10 +283,10 @@ public class KnowledgeBaseQueryService {
         return text.substring(0, 240) + "...";
     }
 
-    public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question) {
+    public Flux<StreamPart> answerQuestionStream(List<Long> knowledgeBaseIds, String question) {
         log.info("收到知识库流式提问: kbIds={}, question={}", knowledgeBaseIds, question);
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
-            return Flux.just(NO_RESULT_RESPONSE);
+            return Flux.just(StreamPart.content(NO_RESULT_RESPONSE));
         }
 
         try {
@@ -295,7 +298,7 @@ public class KnowledgeBaseQueryService {
             List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
 
             if (!hasEffectiveHit(question, relevantDocs)) {
-                return Flux.just(NO_RESULT_RESPONSE);
+                return Flux.just(StreamPart.content(NO_RESULT_RESPONSE));
             }
 
             // 3. 构建上下文
@@ -309,24 +312,26 @@ public class KnowledgeBaseQueryService {
             String systemPrompt = buildSystemPrompt();
             String userPrompt = buildUserPrompt(context, question);
 
-            // 5. 流式调用 + 探测窗口归一化：既保留流式速度，又避免无信息长文
-            Flux<String> responseFlux = chatClient.prompt()
+            // 5. 流式调用（chatResponse 拆分推理/正文）+ 探测窗口归一化（仅针对正文）
+            Flux<StreamPart> responseFlux = ChatResponseStreamMapper.toStreamParts(
+                chatClient.prompt()
                     .system(systemPrompt)
                     .user(userPrompt)
                     .stream()
-                    .content();
+                    .chatResponse()
+            );
 
             log.info("开始流式输出知识库回答(探测窗口): kbIds={}", knowledgeBaseIds);
-            return normalizeStreamOutput(responseFlux)
+            return normalizeStreamParts(responseFlux)
                 .doOnComplete(() -> log.info("流式输出完成: kbIds={}", knowledgeBaseIds))
                 .onErrorResume(e -> {
                     log.error("流式输出失败: kbIds={}, error={}", knowledgeBaseIds, e.getMessage(), e);
-                    return Flux.just("【错误】知识库查询失败：AI服务暂时不可用，请稍后重试。");
+                    return Flux.just(StreamPart.content("【错误】知识库查询失败：AI服务暂时不可用，请稍后重试。"));
                 });
 
         } catch (Exception e) {
             log.error("知识库流式问答失败: {}", e.getMessage(), e);
-            return Flux.just("【错误】知识库查询失败：" + e.getMessage());
+            return Flux.just(StreamPart.content("【错误】知识库查询失败：" + e.getMessage()));
         }
     }
 
@@ -454,38 +459,47 @@ public class KnowledgeBaseQueryService {
                 || text.contains("无法根据提供内容回答");
         }
 
-        private Flux<String> normalizeStreamOutput(Flux<String> rawFlux) {
+        /**
+         * 探测窗口仅针对 {@link StreamPart#TYPE_CONTENT}；探测完成前丢弃 reasoning，避免思考区闪现后再被截断。
+         */
+        private Flux<StreamPart> normalizeStreamParts(Flux<StreamPart> rawFlux) {
             return Flux.create(sink -> {
                 StringBuilder probeBuffer = new StringBuilder();
                 AtomicBoolean passthrough = new AtomicBoolean(false);
                 AtomicBoolean completed = new AtomicBoolean(false);
                 final Disposable[] disposableRef = new Disposable[1];
-    
+
                 disposableRef[0] = rawFlux.subscribe(
-                    chunk -> {
+                    part -> {
                         if (completed.get() || sink.isCancelled()) {
                             return;
                         }
-                        if (passthrough.get()) {
-                            sink.next(chunk);
+                        if (StreamPart.TYPE_REASONING.equals(part.type())) {
+                            if (passthrough.get()) {
+                                sink.next(part);
+                            }
                             return;
                         }
-    
-                        probeBuffer.append(chunk);
+                        if (passthrough.get()) {
+                            sink.next(part);
+                            return;
+                        }
+
+                        probeBuffer.append(part.delta());
                         String probeText = probeBuffer.toString();
                         if (isNoResultLike(probeText)) {
                             completed.set(true);
-                            sink.next(NO_RESULT_RESPONSE);
+                            sink.next(StreamPart.content(NO_RESULT_RESPONSE));
                             sink.complete();
                             if (disposableRef[0] != null) {
                                 disposableRef[0].dispose();
                             }
                             return;
                         }
-    
+
                         if (probeBuffer.length() >= STREAM_PROBE_CHARS) {
                             passthrough.set(true);
-                            sink.next(probeText);
+                            sink.next(StreamPart.content(probeText));
                             probeBuffer.setLength(0);
                         }
                     },
@@ -495,19 +509,19 @@ public class KnowledgeBaseQueryService {
                             return;
                         }
                         if (!passthrough.get()) {
-                            sink.next(normalizeAnswer(probeBuffer.toString()));
+                            sink.next(StreamPart.content(normalizeAnswer(probeBuffer.toString())));
                         }
                         sink.complete();
                     }
                 );
-    
+
                 sink.onCancel(() -> {
                     if (disposableRef[0] != null) {
                         disposableRef[0].dispose();
                     }
                 });
             });
-            }
+        }
 
         private record SearchParams(int topK, double minScore) {
         }

@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.HashSet;
 import reactor.core.publisher.Flux;
 
+import com.ash.springai.interview_platform.streaming.StreamPart;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -134,7 +136,7 @@ public class RagChatSessionService {
         log.info("完成流式消息: messageId={}, contentLength={}", messageId, content.length());
     }
 
-    public Flux<String> getStreamAnswer(Long sessionId, String question) {
+    public Flux<StreamPart> getStreamAnswer(Long sessionId, String question) {
         RagChatSessionEntity session = sessionRepository.findByIdWithKnowledgeBases(sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
 

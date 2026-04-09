@@ -19,6 +19,8 @@ interface Message {
   id?: number;
   type: 'user' | 'assistant';
   content: string;
+  /** 仅当次流式 assistant 消息：模型思考文本（不落库） */
+  reasoningText?: string;
   timestamp: Date;
 }
 
@@ -290,14 +292,16 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     setMessages(prev => [...prev, assistantMessage]);
 
     let fullContent = '';
-    const updateAssistantMessage = (content: string) => {
+    let reasoningAcc = '';
+    const updateAssistantMessage = (content: string, reasoningText?: string) => {
       setMessages(prev => {
         const newMessages = [...prev];
         const lastIndex = newMessages.length - 1;
         if (lastIndex >= 0 && newMessages[lastIndex].type === 'assistant') {
           newMessages[lastIndex] = {
             ...newMessages[lastIndex],
-            content: content,
+            content,
+            ...(reasoningText !== undefined ? { reasoningText } : {}),
           };
         }
         return newMessages;
@@ -308,14 +312,18 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
       await ragChatApi.sendMessageStream(
         sessionId,
         userQuestion,
-        (chunk: string) => {
-          fullContent += chunk;
+        part => {
+          if (part.type === 'reasoning') {
+            reasoningAcc += part.delta;
+          } else {
+            fullContent += part.delta;
+          }
           if (rafRef.current) {
             cancelAnimationFrame(rafRef.current);
           }
           rafRef.current = requestAnimationFrame(() => {
             startTransition(() => {
-              updateAssistantMessage(fullContent);
+              updateAssistantMessage(fullContent, reasoningAcc || undefined);
             });
           });
         },
@@ -325,7 +333,7 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
         },
         (error: Error) => {
           console.error('流式查询失败:', error);
-          updateAssistantMessage(fullContent || error.message || '回答失败，请重试');
+          updateAssistantMessage(fullContent || error.message || '回答失败，请重试', reasoningAcc || undefined);
           setLoading(false);
         }
       );
@@ -539,6 +547,16 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
                                 <p className="whitespace-pre-wrap leading-relaxed text-sm">{msg.content}</p>
                               ) : (
                                   <div className="prose prose-slate dark:prose-invert prose-sm max-w-none">
+                                  {msg.reasoningText ? (
+                                    <details className="mb-3 not-prose rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/40 text-left">
+                                      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                                        思考
+                                      </summary>
+                                      <pre className="px-3 pb-3 pt-0 text-xs whitespace-pre-wrap text-slate-600 dark:text-slate-400 font-sans">
+                                        {msg.reasoningText}
+                                      </pre>
+                                    </details>
+                                  ) : null}
                                   <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
                                     components={{

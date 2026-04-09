@@ -1,5 +1,7 @@
 import {getErrorMessage, request} from './request';
 import { clearAuthSession, getAccessToken } from '../auth/storage';
+import type { StreamEnvelope } from './streamTypes';
+import { parseDualChannelSseResponse } from './parseDualChannelSse';
 
 // 向量化状态
 export type VectorStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -179,12 +181,11 @@ export const knowledgeBaseApi = {
   },
 
   /**
-   * 基于知识库回答问题（流式SSE）
-   * 注意：SSE 使用 fetch API，不走统一的 axios 封装
+   * 基于知识库回答问题（流式 SSE，JSON 信封 + `[DONE]`）
    */
   async queryKnowledgeBaseStream(
     req: QueryRequest,
-    onMessage: (chunk: string) => void,
+    onPart: (part: StreamEnvelope) => void,
     onComplete: () => void,
     onError: (error: Error) => void
   ): Promise<void> {
@@ -218,72 +219,7 @@ export const knowledgeBaseApi = {
         throw new Error(`请求失败 (${response.status})`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('无法获取响应流');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let streamDone = false;
-
-      const DONE_TOKEN = '[DONE]';
-
-      const extractContent = (line: string): string | null | 'DONE' => {
-        if (!line.startsWith('data:')) {
-          return null;
-        }
-        let content = line.substring(5);
-        if (content.startsWith(' ')) {
-          content = content.substring(1);
-        }
-        if (content.trim() === DONE_TOKEN) {
-          return 'DONE';
-        }
-        if (content.length === 0) {
-          return '\n';
-        }
-        return content;
-      };
-
-      const finishStream = () => {
-        if (streamDone) return;
-        streamDone = true;
-        reader.cancel().catch(() => {});
-        onComplete();
-      };
-
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          if (buffer) {
-            const content = extractContent(buffer);
-            if (content && content !== 'DONE') {
-              onMessage(content);
-            }
-          }
-          if (!streamDone) finishStream();
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (streamDone) break;
-          const content = extractContent(line);
-          if (content === 'DONE') {
-            finishStream();
-            break;
-          }
-          if (content !== null) {
-            onMessage(content);
-          }
-        }
-      }
+      await parseDualChannelSseResponse(response, onPart, onComplete, onError);
     } catch (error) {
       onError(new Error(getErrorMessage(error)));
     }
