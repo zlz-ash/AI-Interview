@@ -17,25 +17,43 @@ class JwtTokenServiceTests {
         properties.setAccessTokenMinutes(30);
 
         JwtTokenService tokenService = new JwtTokenService(properties);
-        String token = tokenService.generateToken("ash", List.of("ADMIN", "USER"));
+        String token = tokenService.generateAccessToken("ash", List.of("ADMIN", "USER"), List.of("USER:READ"));
 
-        JwtTokenService.JwtUserPrincipal principal = tokenService.parseAndValidate(token);
+        JwtTokenService.AccessTokenPrincipal principal = tokenService.parseAccessToken(token);
         assertEquals("ash", principal.username());
         assertEquals(List.of("ADMIN", "USER"), principal.roles());
         assertTrue(principal.expiresAtEpochSecond() > 0);
     }
 
     @Test
-    void shouldResolveDifferentExpiresInForRememberMe() {
+    void shouldGenerateAndParseRefreshTokenWithSidAndJti() {
         AuthProperties properties = new AuthProperties();
         properties.setJwtSecret("0123456789abcdef0123456789abcdef");
         properties.setJwtIssuer("interview-platform");
-        properties.setAccessTokenMinutes(30);
-        properties.setRememberMeTokenDays(7);
+        properties.setAccessTokenMinutes(60);
+        properties.setRefreshTokenDays(30);
 
         JwtTokenService tokenService = new JwtTokenService(properties);
-        assertEquals(30 * 60, tokenService.resolveExpiresInSeconds(false));
-        assertEquals(7 * 24 * 60 * 60, tokenService.resolveExpiresInSeconds(true));
+        String token = tokenService.generateRefreshToken("ash", "sid-1", "jti-1");
+
+        JwtTokenService.RefreshTokenPrincipal principal = tokenService.parseRefreshToken(token);
+        assertEquals("ash", principal.username());
+        assertEquals("sid-1", principal.sessionId());
+        assertEquals("jti-1", principal.tokenId());
+        assertTrue(principal.expiresAtEpochSecond() > principal.issuedAtEpochSecond());
+    }
+
+    @Test
+    void shouldResolveDifferentExpiresInForAccessAndRefresh() {
+        AuthProperties properties = new AuthProperties();
+        properties.setJwtSecret("0123456789abcdef0123456789abcdef");
+        properties.setJwtIssuer("interview-platform");
+        properties.setAccessTokenMinutes(60);
+        properties.setRefreshTokenDays(30);
+
+        JwtTokenService tokenService = new JwtTokenService(properties);
+        assertEquals(60 * 60, tokenService.resolveAccessExpiresInSeconds());
+        assertEquals(30L * 24 * 60 * 60, tokenService.resolveRefreshExpiresInSeconds());
     }
 }
 

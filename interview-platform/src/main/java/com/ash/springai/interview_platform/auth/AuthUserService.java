@@ -71,7 +71,15 @@ public class AuthUserService implements UserDetailsService {
 
         List<String> roles = resolveRoles(userEntity.getId());
         List<String> permissions = resolvePermissions(userEntity.getId());
-        return new AuthenticatedUser(userEntity.getUsername(), roles, permissions);
+        return new AuthenticatedUser(userEntity.getId(), userEntity.getUsername(), roles, permissions);
+    }
+
+    public AuthenticatedUser loadAuthenticatedUser(String username) {
+        AuthUserEntity userEntity = authUserRepository.findByUsernameAndEnabledTrue(username)
+            .orElseThrow(() -> new BadCredentialsException("用户名或密码错误"));
+        List<String> roles = resolveRoles(userEntity.getId());
+        List<String> permissions = resolvePermissions(userEntity.getId());
+        return new AuthenticatedUser(userEntity.getId(), userEntity.getUsername(), roles, permissions);
     }
 
     private List<String> resolveRoles(Long userId) {
@@ -89,6 +97,6 @@ public class AuthUserService implements UserDetailsService {
             .toList();
     }
 
-    public record AuthenticatedUser(String username, List<String> roles, List<String> permissions) {}
+    public record AuthenticatedUser(Long userId, String username, List<String> roles, List<String> permissions) {}
 }
 

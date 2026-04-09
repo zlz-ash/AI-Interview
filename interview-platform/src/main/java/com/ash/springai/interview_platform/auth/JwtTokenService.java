@@ -19,6 +19,11 @@ public class JwtTokenService {
 
     private static final String CLAIM_ROLES = "roles";
     private static final String CLAIM_PERMISSIONS = "permissions";
+    private static final String CLAIM_TOKEN_TYPE = "type";
+    private static final String CLAIM_SESSION_ID = "sid";
+    private static final String CLAIM_TOKEN_ID = "jti";
+    private static final String TOKEN_TYPE_ACCESS = "access";
+    private static final String TOKEN_TYPE_REFRESH = "refresh";
 
     private final AuthProperties authProperties;
     private final SecretKey secretKey;
@@ -29,8 +34,7 @@ public class JwtTokenService {
     }
 
     public String generateToken(String username, List<String> roles) {
-        long expiresInSeconds = authProperties.getAccessTokenMinutes() * 60;
-        return generateToken(username, roles, List.of(), expiresInSeconds);
+        return generateAccessToken(username, roles, List.of());
     }
 
     public String generateToken(String username, List<String> roles, List<String> permissions, long expiresInSeconds) {
@@ -47,6 +51,36 @@ public class JwtTokenService {
             .compact();
     }
 
+    public String generateAccessToken(String username, List<String> roles, List<String> permissions) {
+        Instant now = Instant.now();
+        Instant expiresAt = now.plusSeconds(resolveAccessExpiresInSeconds());
+        return Jwts.builder()
+            .issuer(authProperties.getJwtIssuer())
+            .subject(username)
+            .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_ACCESS)
+            .claim(CLAIM_ROLES, roles)
+            .claim(CLAIM_PERMISSIONS, permissions)
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(expiresAt))
+            .signWith(secretKey)
+            .compact();
+    }
+
+    public String generateRefreshToken(String username, String sessionId, String tokenId) {
+        Instant now = Instant.now();
+        Instant expiresAt = now.plusSeconds(resolveRefreshExpiresInSeconds());
+        return Jwts.builder()
+            .issuer(authProperties.getJwtIssuer())
+            .subject(username)
+            .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_REFRESH)
+            .claim(CLAIM_SESSION_ID, sessionId)
+            .claim(CLAIM_TOKEN_ID, tokenId)
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(expiresAt))
+            .signWith(secretKey)
+            .compact();
+    }
+
     public long resolveExpiresInSeconds(boolean rememberMe) {
         if (rememberMe) {
             return authProperties.getRememberMeTokenDays() * 24 * 60 * 60;
@@ -54,12 +88,34 @@ public class JwtTokenService {
         return authProperties.getAccessTokenMinutes() * 60;
     }
 
+    public long resolveAccessExpiresInSeconds() {
+        return authProperties.getAccessTokenMinutes() * 60;
+    }
+
+    public long resolveRefreshExpiresInSeconds() {
+        return authProperties.getRefreshTokenDays() * 24 * 60 * 60;
+    }
+
     public JwtUserPrincipal parseAndValidate(String token) {
+        AccessTokenPrincipal principal = parseAccessToken(token);
+        return new JwtUserPrincipal(
+            principal.username(),
+            principal.roles(),
+            principal.permissions(),
+            principal.expiresAtEpochSecond()
+        );
+    }
+
+    public AccessTokenPrincipal parseAccessToken(String token) {
         Claims claims = Jwts.parser()
             .verifyWith(secretKey)
             .build()
             .parseSignedClaims(token)
             .getPayload();
+        String tokenType = claims.get(CLAIM_TOKEN_TYPE, String.class);
+        if (tokenType != null && !TOKEN_TYPE_ACCESS.equals(tokenType)) {
+            throw new IllegalArgumentException("token type mismatch");
+        }
 
         String username = claims.getSubject();
         @SuppressWarnings("unchecked")
@@ -68,8 +124,30 @@ public class JwtTokenService {
         List<String> permissions = claims.get(CLAIM_PERMISSIONS, List.class);
         List<String> normalizedRoles = roles == null ? List.of() : new ArrayList<>(roles);
         List<String> normalizedPermissions = permissions == null ? List.of() : new ArrayList<>(permissions);
+        long issuedAt = claims.getIssuedAt().toInstant().getEpochSecond();
         long expiresAt = claims.getExpiration().toInstant().getEpochSecond();
-        return new JwtUserPrincipal(username, normalizedRoles, normalizedPermissions, expiresAt);
+        return new AccessTokenPrincipal(username, normalizedRoles, normalizedPermissions, issuedAt, expiresAt);
+    }
+
+    public RefreshTokenPrincipal parseRefreshToken(String token) {
+        Claims claims = Jwts.parser()
+            .verifyWith(secretKey)
+            .build()
+            .parseSignedClaims(token)
+            .getPayload();
+        String tokenType = claims.get(CLAIM_TOKEN_TYPE, String.class);
+        if (!TOKEN_TYPE_REFRESH.equals(tokenType)) {
+            throw new IllegalArgumentException("token type mismatch");
+        }
+        long issuedAt = claims.getIssuedAt().toInstant().getEpochSecond();
+        long expiresAt = claims.getExpiration().toInstant().getEpochSecond();
+        return new RefreshTokenPrincipal(
+            claims.getSubject(),
+            claims.get(CLAIM_SESSION_ID, String.class),
+            claims.get(CLAIM_TOKEN_ID, String.class),
+            issuedAt,
+            expiresAt
+        );
     }
 
     private SecretKey buildKey(String secret) {
@@ -99,6 +177,22 @@ public class JwtTokenService {
         String username,
         List<String> roles,
         List<String> permissions,
+        long expiresAtEpochSecond
+    ) {}
+
+    public record AccessTokenPrincipal(
+        String username,
+        List<String> roles,
+        List<String> permissions,
+        long issuedAtEpochSecond,
+        long expiresAtEpochSecond
+    ) {}
+
+    public record RefreshTokenPrincipal(
+        String username,
+        String sessionId,
+        String tokenId,
+        long issuedAtEpochSecond,
         long expiresAtEpochSecond
     ) {}
 }
