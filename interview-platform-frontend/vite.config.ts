@@ -24,6 +24,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
+        // 开发环境：避免 http-proxy 对长连接流式响应做不必要的缓冲
+        buffer: false,
       },
     },
   },
