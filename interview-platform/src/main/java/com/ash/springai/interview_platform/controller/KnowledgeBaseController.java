@@ -10,14 +10,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.http.MediaType;
-import org.springframework.http.codec.ServerSentEvent;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import com.ash.springai.interview_platform.streaming.DualChannelSse;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
 
@@ -27,7 +22,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 
 import com.ash.springai.interview_platform.service.KnowledgeBaseUploadService;
-import com.ash.springai.interview_platform.service.KnowledgeBaseQueryService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseListService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseDeleteService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseChunkBrowseService;
@@ -37,12 +31,8 @@ import com.ash.springai.interview_platform.common.Result;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseListItemDTO;
 import com.ash.springai.interview_platform.enums.VectorStatus;
 import com.ash.springai.interview_platform.annotation.RateLimit;
-import com.ash.springai.interview_platform.Entity.QueryRequest;
-import com.ash.springai.interview_platform.Entity.QueryResponse;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseStatsDTO;
 import com.ash.springai.interview_platform.Entity.DocumentChunksResponse;
-
-import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -55,12 +45,10 @@ import java.nio.charset.StandardCharsets;
 public class KnowledgeBaseController {
 
     private final KnowledgeBaseUploadService uploadService;
-    private final KnowledgeBaseQueryService queryService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseDeleteService deleteService;
     private final KnowledgeBaseChunkBrowseService chunkBrowseService;
     private final LegacyKnowledgeBaseCleanupService legacyCleanupService;
-    private final ObjectMapper objectMapper;
 
     @GetMapping("/api/knowledgebase/list")
     public Result<List<KnowledgeBaseListItemDTO>> getAllKnowledgeBases(
@@ -104,32 +92,6 @@ public class KnowledgeBaseController {
     public Result<Void> deleteKnowledgeBase(@PathVariable Long id) {
         deleteService.deleteKnowledgeBase(id);
         return Result.success(null);
-    }
-
-    @PostMapping("/api/knowledgebase/query")
-    @RateLimit.Container({
-            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10),
-            @RateLimit(dimension = RateLimit.Dimension.IP, count = 10)
-    })
-    public Result<QueryResponse> queryKnowledgeBase(@Valid @RequestBody QueryRequest request) {
-        return Result.success(queryService.queryKnowledgeBase(request));
-    }
-
-    @PostMapping(value = "/api/knowledgebase/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @RateLimit.Container({
-            @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5),
-            @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
-    })
-    public Flux<ServerSentEvent<String>> queryKnowledgeBaseStream(@Valid @RequestBody QueryRequest request) {
-        log.debug("收到知识库流式查询请求: kbIds={}, question={}, 线程: {} (虚拟线程: {})",
-            request.knowledgeBaseIds(), request.question(), Thread.currentThread(), Thread.currentThread().isVirtual());
-        return Flux.concat(
-            DualChannelSse.partsToSseEvents(
-                queryService.answerQuestionStream(request.knowledgeBaseIds(), request.question()),
-                objectMapper
-            ),
-            Flux.just(ServerSentEvent.<String>builder().data("[DONE]").build())
-        );
     }
 
     @GetMapping("/api/knowledgebase/categories")

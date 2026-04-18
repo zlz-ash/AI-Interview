@@ -74,6 +74,14 @@ public class RagChatController {
         return Result.success(null);
     }
 
+    @PutMapping("/api/rag-chat/sessions/{sessionId}/retrieval-mode")
+    public Result<Void> updateRetrievalMode(
+            @PathVariable Long sessionId,
+            @Valid @RequestBody UpdateRetrievalModeRequest request) {
+        sessionService.updateRetrievalMode(sessionId, request.retrievalMode());
+        return Result.success(null);
+    }
+
     @DeleteMapping("/api/rag-chat/sessions/{sessionId}")
     public Result<Void> deleteSession(@PathVariable Long sessionId) {
         sessionService.deleteSession(sessionId);

@@ -2,15 +2,20 @@ package com.ash.springai.interview_platform.Entity;
 
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.util.List;
 import java.time.LocalDateTime;
+
+import com.ash.springai.interview_platform.enums.RetrievalMode;
 
 public class RagChatDTO {
     public record CreateSessionRequest(
         @NotEmpty(message = "至少选择一个知识库")
         List<Long> knowledgeBaseIds,
 
-        String title  // 可选，为空则自动生成
+        String title,  // 可选，为空则自动生成
+
+        RetrievalMode retrievalMode
     ) {}
 
     public record SendMessageRequest(
@@ -32,7 +37,8 @@ public class RagChatDTO {
         Long id,
         String title,
         List<Long> knowledgeBaseIds,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        RetrievalMode retrievalMode
     ) {}
 
 
@@ -51,7 +57,13 @@ public class RagChatDTO {
         List<KnowledgeBaseListItemDTO> knowledgeBases,
         List<MessageDTO> messages,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        RetrievalMode retrievalMode
+    ) {}
+
+    public record UpdateRetrievalModeRequest(
+        @NotNull(message = "retrievalMode 不能为空")
+        RetrievalMode retrievalMode
     ) {}
 
     public record MessageDTO(

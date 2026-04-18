@@ -27,15 +27,12 @@ import java.util.regex.Pattern;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 
-import com.ash.springai.interview_platform.exception.BusinessException;
-import com.ash.springai.interview_platform.exception.ErrorCode;
 import com.ash.springai.interview_platform.streaming.ChatResponseStreamMapper;
 import com.ash.springai.interview_platform.streaming.StreamPart;
 import com.ash.springai.interview_platform.Entity.HybridHitDTO;
-import com.ash.springai.interview_platform.Entity.HybridMetaDTO;
-import com.ash.springai.interview_platform.Entity.QueryRequest;
-import com.ash.springai.interview_platform.Entity.QueryResponse;
 import com.ash.springai.interview_platform.Repository.FtsSearchRepository;
+import com.ash.springai.interview_platform.Repository.VectorStoreChunkContentRepository;
+import com.ash.springai.interview_platform.enums.RetrievalMode;
 
 @Slf4j
 @Service
@@ -50,7 +47,6 @@ public class KnowledgeBaseQueryService {
 
     private final ChatClient chatClient;
     private final KnowledgeBaseVectorService vectorService;
-    private final KnowledgeBaseListService listService;
     private final KnowledgeBaseCountService countService;
     private final FtsSearchRepository ftsSearchRepository;
     private final QueryIntentClassifier queryIntentClassifier;
@@ -66,13 +62,14 @@ public class KnowledgeBaseQueryService {
     private final int topkLong;
     private final double minScoreShort;
     private final double minScoreDefault;
+    private final VectorStoreChunkContentRepository chunkContentRepository;
 
     public KnowledgeBaseQueryService(
             ChatClient.Builder chatClientBuilder,
             KnowledgeBaseVectorService vectorService,
-            KnowledgeBaseListService listService,
             KnowledgeBaseCountService countService,
             FtsSearchRepository ftsSearchRepository,
+            VectorStoreChunkContentRepository chunkContentRepository,
             QueryIntentClassifier queryIntentClassifier,
             RuleRerankService ruleRerankService,
             ThresholdRelaxationPolicy thresholdRelaxationPolicy,
@@ -88,9 +85,9 @@ public class KnowledgeBaseQueryService {
             @Value("${app.ai.rag.search.min-score-default:0.28}") double minScoreDefault) throws IOException {
         this.chatClient = chatClientBuilder.build();
         this.vectorService = vectorService;
-        this.listService = listService;
         this.countService = countService;
         this.ftsSearchRepository = ftsSearchRepository;
+        this.chunkContentRepository = chunkContentRepository;
         this.queryIntentClassifier = queryIntentClassifier;
         this.ruleRerankService = ruleRerankService;
         this.thresholdRelaxationPolicy = thresholdRelaxationPolicy;
@@ -106,56 +103,6 @@ public class KnowledgeBaseQueryService {
         this.minScoreDefault = minScoreDefault;
     }
 
-    public String answerQuestion(Long knowledgeBaseId, String question) {
-        return answerQuestion(List.of(knowledgeBaseId), question);
-    }
-
-    public String answerQuestion(List<Long> knowledgeBaseIds, String question) {
-        log.info("收到知识库提问: kbIds={}, question={}", knowledgeBaseIds, question);
-        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
-            return NO_RESULT_RESPONSE;
-        }
-
-        // 1. 验证知识库是否存在并更新问题计数（合并数据库操作）
-        countService.updateQuestionCounts(knowledgeBaseIds);
-
-        // 2. Query rewrite + 动态参数检索（RAG）
-        QueryContext queryContext = buildQueryContext(question);
-        List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
-
-        if (!hasEffectiveHit(question, relevantDocs)) {
-            return NO_RESULT_RESPONSE;
-        }
-
-        // 3. 构建上下文（合并检索到的文档）
-        String context = relevantDocs.stream()
-                .map(Document::getText)
-                .collect(Collectors.joining("\n\n---\n\n"));
-
-        log.debug("检索到 {} 个相关文档片段", relevantDocs.size());
-
-        // 4. 构建提示词
-        String systemPrompt = buildSystemPrompt();
-        String userPrompt = buildUserPrompt(context, question);
-
-        try {
-            // 5. 调用AI生成回答
-            String answer = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
-            answer = normalizeAnswer(answer);
-
-            log.info("知识库问答完成: kbIds={}", knowledgeBaseIds);
-            return answer;
-
-        } catch (Exception e) {
-            log.error("知识库问答失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED, "知识库查询失败：" + e.getMessage());
-        }
-    }
-
     private String buildSystemPrompt() {
         return systemPromptTemplate.render();
     }
@@ -167,48 +114,43 @@ public class KnowledgeBaseQueryService {
         return userPromptTemplate.render(variables);
     }
 
-    public QueryResponse queryKnowledgeBase(QueryRequest request) {
-        String question = normalizeQuestion(request.question());
-        QueryContext queryContext = buildQueryContext(question);
+    private List<HybridHitDTO> computeHybridHits(List<Long> knowledgeBaseIds, String question) {
+        String q = normalizeQuestion(question);
+        QueryContext queryContext = buildQueryContext(q);
         ThresholdRelaxationPolicy.RelaxationState relaxState = thresholdRelaxationPolicy.initial(
             queryContext.searchParams().minScore(),
             0.12,
             queryContext.searchParams().topK(),
             queryContext.searchParams().topK()
         );
-        QueryIntentClassifier.QueryIntent intent = queryIntentClassifier.classify(question);
+        QueryIntentClassifier.QueryIntent intent = queryIntentClassifier.classify(q);
         List<HybridHitDTO> hybridHits = List.of();
-        String mode = "QUERY_NO_EMBEDDING";
-        boolean lowConfidence = false;
 
         while (!relaxState.stop()) {
             try {
                 List<Document> vectorDocs = vectorService.similaritySearch(
                     queryContext.candidateQueries().getFirst(),
-                    request.knowledgeBaseIds(),
+                    knowledgeBaseIds,
                     relaxState.topKVec(),
                     relaxState.vecMinScore()
                 );
-                List<HybridHitDTO> vectorHits = toVectorHits(vectorDocs, request.knowledgeBaseIds());
+                List<HybridHitDTO> vectorHits = toVectorHits(vectorDocs, knowledgeBaseIds);
                 List<HybridHitDTO> ftsHits = ftsSearchRepository.search(
-                    question,
-                    request.knowledgeBaseIds(),
+                    q,
+                    knowledgeBaseIds,
                     relaxState.topKFts(),
                     relaxState.ftsMinRank()
                 );
 
                 if (vectorHits.isEmpty()) {
-                    mode = "QUERY_NO_EMBEDDING";
                     hybridHits = ruleRerankService.rerank(ftsHits, intent);
                 } else {
-                    mode = "QUERY_WITH_EMBEDDING";
                     hybridHits = mergeAndRerank(vectorHits, ftsHits, intent);
                 }
             } catch (Exception e) {
                 log.warn("向量检索不可用(round={})，回退 FTS: {}", relaxState.round(), e.getMessage());
-                mode = "QUERY_NO_EMBEDDING";
                 hybridHits = ruleRerankService.rerank(ftsSearchRepository.search(
-                    question, request.knowledgeBaseIds(), relaxState.topKFts(), relaxState.ftsMinRank()
+                    q, knowledgeBaseIds, relaxState.topKFts(), relaxState.ftsMinRank()
                 ), intent);
             }
 
@@ -216,25 +158,7 @@ public class KnowledgeBaseQueryService {
             log.debug("松弛策略 round={}, hits={}, stop={}, lowConf={}",
                 relaxState.round(), hybridHits.size(), relaxState.stop(), relaxState.lowConfidence());
         }
-
-        lowConfidence = relaxState.lowConfidence();
-
-        String answer = answerQuestion(request.knowledgeBaseIds(), request.question());
-
-        List<String> kbNames = listService.getKnowledgeBaseNames(request.knowledgeBaseIds());
-        String kbNamesStr = String.join("、", kbNames);
-
-        Long primaryKbId = request.knowledgeBaseIds().getFirst();
-
-        HybridMetaDTO meta = new HybridMetaDTO(
-            relaxState.round(),
-            relaxState.vecMinScore(),
-            relaxState.ftsMinRank(),
-            intent.semanticWeight(),
-            intent.keywordWeight(),
-            lowConfidence
-        );
-        return QueryResponse.withSearch(answer, primaryKbId, kbNamesStr, mode, hybridHits, meta);
+        return hybridHits;
     }
 
     private List<HybridHitDTO> toVectorHits(List<Document> docs, List<Long> knowledgeBaseIds) {
@@ -283,8 +207,9 @@ public class KnowledgeBaseQueryService {
         return text.substring(0, 240) + "...";
     }
 
-    public Flux<StreamPart> answerQuestionStream(List<Long> knowledgeBaseIds, String question) {
-        log.info("收到知识库流式提问: kbIds={}, question={}", knowledgeBaseIds, question);
+    public Flux<StreamPart> answerQuestionStream(List<Long> knowledgeBaseIds, String question, RetrievalMode mode) {
+        RetrievalMode effectiveMode = mode != null ? mode : RetrievalMode.HYBRID;
+        log.info("收到知识库流式提问: kbIds={}, mode={}, question={}", knowledgeBaseIds, effectiveMode, question);
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return Flux.just(StreamPart.content(NO_RESULT_RESPONSE));
         }
@@ -293,9 +218,19 @@ public class KnowledgeBaseQueryService {
             // 1. 验证知识库是否存在并更新问题计数
             countService.updateQuestionCounts(knowledgeBaseIds);
 
-            // 2. Query rewrite + 动态参数检索
+            // 2. 检索
             QueryContext queryContext = buildQueryContext(question);
-            List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
+            List<Document> relevantDocs;
+            if (effectiveMode == RetrievalMode.HYBRID) {
+                List<HybridHitDTO> hybridHits = computeHybridHits(knowledgeBaseIds, question);
+                LinkedHashSet<String> chunkIdOrder = new LinkedHashSet<>();
+                for (HybridHitDTO hit : hybridHits) {
+                    chunkIdOrder.add(hit.chunkId());
+                }
+                relevantDocs = chunkContentRepository.loadDocumentsInOrder(new ArrayList<>(chunkIdOrder));
+            } else {
+                relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
+            }
 
             if (!hasEffectiveHit(question, relevantDocs)) {
                 return Flux.just(StreamPart.content(NO_RESULT_RESPONSE));

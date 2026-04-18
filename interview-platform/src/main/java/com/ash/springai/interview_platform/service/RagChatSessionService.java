@@ -11,6 +11,7 @@ import com.ash.springai.interview_platform.Repository.RagChatMessageRepository;
 import com.ash.springai.interview_platform.Repository.KnowledgeBaseRepository;
 import com.ash.springai.interview_platform.mapper.RagChatMapper;
 import com.ash.springai.interview_platform.mapper.KnowledgeBaseMapper;
+import com.ash.springai.interview_platform.enums.RetrievalMode;
 import com.ash.springai.interview_platform.Entity.RagChatDTO.CreateSessionRequest;
 import com.ash.springai.interview_platform.Entity.RagChatDTO.SessionDTO;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
@@ -56,6 +57,9 @@ public class RagChatSessionService {
             ? request.title()
             : generateTitle(knowledgeBases));
         session.setKnowledgeBases(new HashSet<>(knowledgeBases));
+        if (request.retrievalMode() != null) {
+            session.setRetrievalMode(request.retrievalMode());
+        }
 
         session = sessionRepository.save(session);
 
@@ -141,8 +145,17 @@ public class RagChatSessionService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
 
         List<Long> kbIds = session.getKnowledgeBaseIds();
+        RetrievalMode mode = session.getRetrievalMode() != null ? session.getRetrievalMode() : RetrievalMode.HYBRID;
 
-        return queryService.answerQuestionStream(kbIds, question);
+        return queryService.answerQuestionStream(kbIds, question, mode);
+    }
+
+    @Transactional
+    public void updateRetrievalMode(Long sessionId, RetrievalMode mode) {
+        RagChatSessionEntity session = sessionRepository.findById(sessionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
+        session.setRetrievalMode(mode);
+        sessionRepository.save(session);
     }
 
     @Transactional
