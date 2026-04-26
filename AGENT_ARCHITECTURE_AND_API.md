@@ -132,8 +132,6 @@
 | GET | `/api/knowledgebase/list` |
 | GET | `/api/knowledgebase/{id}` |
 | DELETE | `/api/knowledgebase/{id}` |
-| POST | `/api/knowledgebase/query` |
-| POST | `/api/knowledgebase/query/stream`（SSE） |
 | GET | `/api/knowledgebase/categories` |
 | GET | `/api/knowledgebase/category/{category}` |
 | GET | `/api/knowledgebase/uncategorized` |
@@ -146,6 +144,8 @@
 
 ### 6.5 RAG 对话 `RagChatController`
 
+知识库问答仅通过 RAG 会话流式接口；创建会话时请求体可含可选字段 `retrievalMode`（`HYBRID` | `VECTOR`，默认 `HYBRID`）。
+
 | 方法 | 路径 |
 |------|------|
 | POST | `/api/rag-chat/sessions` |
@@ -154,6 +154,7 @@
 | PUT | `/api/rag-chat/sessions/{sessionId}/title` |
 | PUT | `/api/rag-chat/sessions/{sessionId}/pin` |
 | PUT | `/api/rag-chat/sessions/{sessionId}/knowledge-bases` |
+| PUT | `/api/rag-chat/sessions/{sessionId}/retrieval-mode` |
 | DELETE | `/api/rag-chat/sessions/{sessionId}` |
 | POST | `/api/rag-chat/sessions/{sessionId}/messages/stream`（SSE） |
 

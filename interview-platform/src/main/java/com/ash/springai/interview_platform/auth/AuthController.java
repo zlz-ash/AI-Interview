@@ -26,35 +26,78 @@ public class AuthController {
 
     private final AuthUserService authUserService;
     private final JwtTokenService jwtTokenService;
-    private final AuthProperties authProperties;
+    private final RefreshSessionService refreshSessionService;
 
     public AuthController(
         AuthUserService authUserService,
         JwtTokenService jwtTokenService,
-        AuthProperties authProperties
+        RefreshSessionService refreshSessionService
     ) {
         this.authUserService = authUserService;
         this.jwtTokenService = jwtTokenService;
-        this.authProperties = authProperties;
+        this.refreshSessionService = refreshSessionService;
     }
 
     @PostMapping("/api/auth/login")
-    public ResponseEntity<Result<Map<String, Object>>> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<Result<AuthTokenResponse>> login(@Valid @RequestBody LoginRequest request) {
         try {
             AuthUserService.AuthenticatedUser user = authUserService.authenticate(request.username(), request.password());
-            long expiresInSeconds = jwtTokenService.resolveExpiresInSeconds(request.rememberMeEnabled());
-            String token = jwtTokenService.generateToken(user.username(), user.roles(), user.permissions(), expiresInSeconds);
-            Map<String, Object> data = new HashMap<>();
-            data.put("tokenType", "Bearer");
-            data.put("accessToken", token);
-            data.put("expiresIn", expiresInSeconds);
-            data.put("issuedAt", Instant.now().getEpochSecond());
-            data.put("username", user.username());
-            data.put("roles", user.roles());
-            data.put("permissions", user.permissions());
-            data.put("rememberMe", request.rememberMeEnabled());
-            return ResponseEntity.ok(Result.success(data));
+            long accessExpiresIn = jwtTokenService.resolveAccessExpiresInSeconds();
+            long refreshExpiresIn = jwtTokenService.resolveRefreshExpiresInSeconds();
+            Instant refreshExpiresAt = Instant.now().plusSeconds(refreshExpiresIn);
+            RefreshSessionService.CreatedSession createdSession = refreshSessionService.createSession(
+                user.userId(),
+                user.username(),
+                refreshExpiresAt
+            );
+            String accessToken = jwtTokenService.generateAccessToken(user.username(), user.roles(), user.permissions());
+            String refreshToken = jwtTokenService.generateRefreshToken(
+                user.username(),
+                createdSession.sessionId(),
+                createdSession.tokenId()
+            );
+            return ResponseEntity.ok(Result.success(
+                AuthTokenResponse.of(user, accessToken, refreshToken, accessExpiresIn, refreshExpiresIn)
+            ));
         } catch (BadCredentialsException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Result.error(ErrorCode.UNAUTHORIZED, e.getMessage()));
+        }
+    }
+
+    @PostMapping("/api/auth/refresh")
+    public ResponseEntity<Result<AuthTokenResponse>> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        try {
+            JwtTokenService.RefreshTokenPrincipal principal = jwtTokenService.parseRefreshToken(request.refreshToken());
+            RefreshSessionService.RotatedSession rotated = refreshSessionService.rotate(
+                principal.sessionId(),
+                principal.tokenId()
+            );
+            AuthUserService.AuthenticatedUser user = authUserService.loadAuthenticatedUser(rotated.username());
+            long accessExpiresIn = jwtTokenService.resolveAccessExpiresInSeconds();
+            long refreshExpiresIn = jwtTokenService.resolveRefreshExpiresInSeconds();
+            String accessToken = jwtTokenService.generateAccessToken(user.username(), user.roles(), user.permissions());
+            String refreshToken = jwtTokenService.generateRefreshToken(
+                user.username(),
+                rotated.sessionId(),
+                rotated.newTokenId()
+            );
+            return ResponseEntity.ok(Result.success(
+                AuthTokenResponse.of(user, accessToken, refreshToken, accessExpiresIn, refreshExpiresIn)
+            ));
+        } catch (BadCredentialsException | IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Result.error(ErrorCode.UNAUTHORIZED, e.getMessage()));
+        }
+    }
+
+    @PostMapping("/api/auth/logout")
+    public ResponseEntity<Result<Void>> logout(@Valid @RequestBody LogoutRequest request) {
+        try {
+            JwtTokenService.RefreshTokenPrincipal principal = jwtTokenService.parseRefreshToken(request.refreshToken());
+            refreshSessionService.revokeCurrentSession(principal.sessionId(), "USER_LOGOUT");
+            return ResponseEntity.ok(Result.success(null));
+        } catch (BadCredentialsException | IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(Result.error(ErrorCode.UNAUTHORIZED, e.getMessage()));
         }

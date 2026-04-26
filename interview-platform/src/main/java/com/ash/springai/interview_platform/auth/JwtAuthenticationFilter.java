@@ -33,6 +33,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
         return uri.startsWith("/api/auth/login")
+            || uri.startsWith("/api/auth/refresh")
+            || uri.startsWith("/api/auth/logout")
             || uri.startsWith("/v3/api-docs")
             || uri.startsWith("/swagger-ui")
             || uri.startsWith("/actuator");

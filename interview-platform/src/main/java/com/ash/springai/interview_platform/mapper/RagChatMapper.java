@@ -10,6 +10,7 @@ import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
 import com.ash.springai.interview_platform.Entity.RagChatDTO.SessionListItemDTO;
 import com.ash.springai.interview_platform.Entity.RagChatDTO.SessionDetailDTO;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseListItemDTO;
+import com.ash.springai.interview_platform.enums.RetrievalMode;
 
 import java.util.List;
 import java.util.Collection;
@@ -22,6 +23,7 @@ import java.util.Collection;
 public interface RagChatMapper {
     
     @Mapping(target = "knowledgeBaseIds", source = "session", qualifiedByName = "extractKnowledgeBaseIds")
+    @Mapping(target = "retrievalMode", source = "session", qualifiedByName = "retrievalModeOrDefault")
     SessionDTO toSessionDTO(RagChatSessionEntity session);
 
     @Mapping(target = "type", source = "message", qualifiedByName = "getTypeString")
@@ -55,6 +57,11 @@ public interface RagChatMapper {
         return session.getIsPinned() != null ? session.getIsPinned() : false;
     }
 
+    @Named("retrievalModeOrDefault")
+    default RetrievalMode retrievalModeOrDefault(RagChatSessionEntity session) {
+        return session.getRetrievalMode() != null ? session.getRetrievalMode() : RetrievalMode.HYBRID;
+    }
+
     default SessionDetailDTO toSessionDetailDTO(
             RagChatSessionEntity session, 
             List<RagChatMessageEntity> messages,
@@ -67,7 +74,8 @@ public interface RagChatMapper {
             knowledgeBases,
             messageDTOs,
             session.getCreatedAt(),
-            session.getUpdatedAt()
+            session.getUpdatedAt(),
+            session.getRetrievalMode() != null ? session.getRetrievalMode() : RetrievalMode.HYBRID
         );
     }
 }

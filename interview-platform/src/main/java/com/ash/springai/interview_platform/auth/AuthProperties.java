@@ -14,6 +14,7 @@ public class AuthProperties {
     private String jwtIssuer = "interview-platform";
     private long accessTokenMinutes = 30;
     private long rememberMeTokenDays = 7;
+    private long refreshTokenDays = 30;
     private List<UserConfig> users = new ArrayList<>();
 
     public String getJwtSecret() {
@@ -46,6 +47,14 @@ public class AuthProperties {
 
     public void setRememberMeTokenDays(long rememberMeTokenDays) {
         this.rememberMeTokenDays = rememberMeTokenDays;
+    }
+
+    public long getRefreshTokenDays() {
+        return refreshTokenDays;
+    }
+
+    public void setRefreshTokenDays(long refreshTokenDays) {
+        this.refreshTokenDays = refreshTokenDays;
     }
 
     public List<UserConfig> getUsers() {

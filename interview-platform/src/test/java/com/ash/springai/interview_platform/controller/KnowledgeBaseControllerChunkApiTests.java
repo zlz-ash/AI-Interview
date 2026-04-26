@@ -5,10 +5,8 @@ import com.ash.springai.interview_platform.Entity.DocumentChunksResponse;
 import com.ash.springai.interview_platform.service.KnowledgeBaseChunkBrowseService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseDeleteService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseListService;
-import com.ash.springai.interview_platform.service.KnowledgeBaseQueryService;
 import com.ash.springai.interview_platform.service.KnowledgeBaseUploadService;
 import com.ash.springai.interview_platform.service.LegacyKnowledgeBaseCleanupService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,15 +30,13 @@ class KnowledgeBaseControllerChunkApiTests {
     @BeforeEach
     void setUp() {
         KnowledgeBaseUploadService uploadService = mock(KnowledgeBaseUploadService.class);
-        KnowledgeBaseQueryService queryService = mock(KnowledgeBaseQueryService.class);
         KnowledgeBaseListService listService = mock(KnowledgeBaseListService.class);
         KnowledgeBaseDeleteService deleteService = mock(KnowledgeBaseDeleteService.class);
         chunkBrowseService = mock(KnowledgeBaseChunkBrowseService.class);
         LegacyKnowledgeBaseCleanupService legacyCleanupService = mock(LegacyKnowledgeBaseCleanupService.class);
 
         KnowledgeBaseController controller = new KnowledgeBaseController(
-            uploadService, queryService, listService, deleteService, chunkBrowseService, legacyCleanupService,
-            new ObjectMapper()
+            uploadService, listService, deleteService, chunkBrowseService, legacyCleanupService
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }

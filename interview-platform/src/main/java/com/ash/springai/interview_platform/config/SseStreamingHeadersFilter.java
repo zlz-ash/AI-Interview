@@ -28,7 +28,7 @@ public class SseStreamingHeadersFilter extends OncePerRequestFilter {
     }
 
     private static boolean isSseStreamPath(String uri) {
-        return uri.contains("/messages/stream") || uri.endsWith("/query/stream");
+        return uri.contains("/messages/stream");
     }
 
     @Override

@@ -12,6 +12,8 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.NoArgsConstructor;
 
+import com.ash.springai.interview_platform.enums.RetrievalMode;
+
 @Entity
 @Table(name = "rag_chat_sessions", indexes = {
     @Index(name = "idx_rag_session_updated", columnList = "updatedAt")
@@ -54,6 +56,10 @@ public class RagChatSessionEntity {
     @Column(columnDefinition = "boolean default false")
     private Boolean isPinned = false;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private RetrievalMode retrievalMode = RetrievalMode.HYBRID;
+
     public enum SessionStatus {
         ACTIVE,    // 活跃会话
         ARCHIVED   // 已归档
@@ -75,6 +81,9 @@ public class RagChatSessionEntity {
         // 确保 isPinned 字段始终有值（兼容旧数据）
         if (isPinned == null) {
             isPinned = false;
+        }
+        if (retrievalMode == null) {
+            retrievalMode = RetrievalMode.HYBRID;
         }
     }
 
