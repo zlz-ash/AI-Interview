@@ -50,7 +50,8 @@ public class KnowledgeBasePersistenceService {
     @Transactional(rollbackFor = Exception.class)
     public KnowledgeBaseEntity saveKnowledgeBase(MultipartFile file, String name, String category,
                                                   String storageKey, String storageUrl, String fileHash,
-                                                  DocumentType documentType, String ingestVersion) {
+                                                  DocumentType documentType, String ingestVersion,
+                                                  String tokenizerProfileId, String tokenizerModel, String chunkingPolicyVersion) {
         try {
             KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
             kb.setFileHash(fileHash);
@@ -64,6 +65,9 @@ public class KnowledgeBasePersistenceService {
             kb.setDocumentType(documentType);
             kb.setIngestVersion(ingestVersion);
             kb.setIngestStatus("PENDING");
+            kb.setTokenizerProfileId(tokenizerProfileId);
+            kb.setTokenizerModel(tokenizerModel);
+            kb.setChunkingPolicyVersion(chunkingPolicyVersion);
 
             KnowledgeBaseEntity saved = knowledgeBaseRepository.save(kb);
             log.info("知识库已保存: id={}, name={}, category={}, hash={}", saved.getId(), saved.getName(), saved.getCategory(), fileHash);

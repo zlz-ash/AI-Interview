@@ -52,6 +52,25 @@ class ChatResponseStreamMapperTest {
     }
 
     @Test
+    void reasoningContentInMetadataEmitsReasoningDeltaBeforeContent() {
+        AssistantMessage m = AssistantMessage.builder()
+            .content("y")
+            .properties(Map.of("reasoningContent", "chain-of-thought"))
+            .build();
+        ChatResponse r = new ChatResponse(List.of(new Generation(m)));
+
+        List<StreamPart> parts = ChatResponseStreamMapper.toStreamParts(Flux.just(r))
+            .collectList()
+            .block(Duration.ofSeconds(5));
+
+        assertEquals(2, parts.size());
+        assertEquals(StreamPart.TYPE_REASONING, parts.get(0).type());
+        assertEquals("chain-of-thought", parts.get(0).delta());
+        assertEquals(StreamPart.TYPE_CONTENT, parts.get(1).type());
+        assertEquals("y", parts.get(1).delta());
+    }
+
+    @Test
     void nonPrefixContentReplacementEmitsFullNewTextAsDelta() {
         ChatResponse r1 = new ChatResponse(List.of(new Generation(AssistantMessage.builder().content("Hello").build())));
         ChatResponse r2 = new ChatResponse(List.of(new Generation(AssistantMessage.builder().content("Hi").build())));

@@ -26,6 +26,9 @@ import java.util.List;
 
 import com.ash.springai.interview_platform.common.Result;
 import com.ash.springai.interview_platform.Entity.RagChatDTO.*;
+import com.ash.springai.interview_platform.Entity.RagEvaluationDTO.EvaluateRequest;
+import com.ash.springai.interview_platform.Entity.RagEvaluationDTO.EvaluateResponse;
+import com.ash.springai.interview_platform.service.KnowledgeBaseQueryService;
 import com.ash.springai.interview_platform.service.RagChatSessionService;
 
 
@@ -35,6 +38,7 @@ import com.ash.springai.interview_platform.service.RagChatSessionService;
 public class RagChatController {
 
     private final RagChatSessionService sessionService;
+    private final KnowledgeBaseQueryService knowledgeBaseQueryService;
     private final ObjectMapper objectMapper;
 
     @PostMapping("/api/rag-chat/sessions")
@@ -86,6 +90,24 @@ public class RagChatController {
     public Result<Void> deleteSession(@PathVariable Long sessionId) {
         sessionService.deleteSession(sessionId);
         return Result.success(null);
+    }
+
+    /**
+     * Ragas 评测专用端点：无状态、同步 Q→A。
+     * <p>
+     * 输入: {@link EvaluateRequest} 里指定 {@code knowledgeBaseIds / question / retrievalMode}（可选）。
+     * 输出: {@link EvaluateResponse} 带上 {@code answer} 与 {@code contexts}（每条 context 含
+     *       chunkId / kbId / source / score / text），供 Python 端构造 ragas 数据集。
+     * <p>
+     * 注意：本端点不落库、不更新 question_count；仅用于离线评测链路。
+     */
+    @PostMapping("/api/rag-chat/evaluate")
+    public Result<EvaluateResponse> evaluate(@Valid @RequestBody EvaluateRequest request) {
+        log.info("[EVAL] 收到评测请求: kbIds={}, mode={}, question={}",
+            request.knowledgeBaseIds(), request.retrievalMode(), request.question());
+        EvaluateResponse resp = knowledgeBaseQueryService.answerQuestionForEval(
+            request.knowledgeBaseIds(), request.question(), request.retrievalMode());
+        return Result.success(resp);
     }
 
     @PostMapping(value = "/api/rag-chat/sessions/{sessionId}/messages/stream",

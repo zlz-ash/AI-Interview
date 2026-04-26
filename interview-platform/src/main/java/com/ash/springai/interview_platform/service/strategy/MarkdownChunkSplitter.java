@@ -2,8 +2,7 @@ package com.ash.springai.interview_platform.service.strategy;
 
 import org.springframework.stereotype.Component;
 
-import com.ash.springai.interview_platform.Entity.IngestChunkDTO;
-import com.ash.springai.interview_platform.config.IngestProperties;
+import com.ash.springai.interview_platform.service.chunking.StructuredChunkCandidate;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -17,37 +16,20 @@ public class MarkdownChunkSplitter {
 
     private static final Pattern HEADING_START = Pattern.compile("(?m)^(#{1,6})\\s+(.+)$");
 
-    private final IngestProperties ingestProperties;
-
-    public MarkdownChunkSplitter(IngestProperties ingestProperties) {
-        this.ingestProperties = ingestProperties;
-    }
-
-    public List<IngestChunkDTO> split(String content) {
+    public List<StructuredChunkCandidate> splitStructured(String content) {
         if (content == null || content.isBlank()) {
             return List.of();
         }
-        IngestProperties.Markdown cfg = ingestProperties.getMarkdown();
-        int maxTok = cfg.getTargetMaxTokens();
-        int overlapTok = cfg.getOverlapMaxTokens();
-        int maxChars = Math.max(1, maxTok * 4);
-        int overlapChars = Math.min(maxChars - 1, Math.max(0, overlapTok * 4));
 
-        List<IngestChunkDTO> out = new ArrayList<>();
-        int globalIdx = 0;
+        List<StructuredChunkCandidate> out = new ArrayList<>();
         for (Section sec : splitIntoSections(content.trim())) {
-            for (String piece : splitBySize(sec.body(), maxChars, overlapChars)) {
-                String text = piece.trim();
-                if (text.isEmpty()) {
-                    continue;
-                }
-                int est = estimateTokens(text);
-                Map<String, Object> meta = new HashMap<>();
-                meta.put("section_path", sec.path());
-                meta.put("heading", sec.heading());
-                meta.put("chunk_index", globalIdx + 1);
-                out.add(new IngestChunkDTO(++globalIdx, text, est, meta));
+            String text = sec.body() == null ? "" : sec.body().trim();
+            if (text.isEmpty()) {
+                continue;
             }
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("source_type", "markdown");
+            out.add(new StructuredChunkCandidate(sec.path(), sec.heading(), text, meta));
         }
         return out;
     }
@@ -96,38 +78,6 @@ public class MarkdownChunkSplitter {
             return String.join(" > ", next);
         }
         return previousPath + " > " + heading;
-    }
-
-    private static List<String> splitBySize(String text, int maxChars, int overlapChars) {
-        List<String> parts = new ArrayList<>();
-        if (text == null || text.isEmpty()) {
-            return parts;
-        }
-        if (text.length() <= maxChars) {
-            parts.add(text);
-            return parts;
-        }
-        int start = 0;
-        while (start < text.length()) {
-            int end = Math.min(start + maxChars, text.length());
-            parts.add(text.substring(start, end));
-            if (end >= text.length()) {
-                break;
-            }
-            int next = end - overlapChars;
-            start = Math.max(0, next);
-            if (start >= end) {
-                start = end;
-            }
-        }
-        return parts;
-    }
-
-    static int estimateTokens(String s) {
-        if (s == null || s.isEmpty()) {
-            return 0;
-        }
-        return (s.length() + 3) / 4;
     }
 
     private record Section(String path, String heading, String body) {}

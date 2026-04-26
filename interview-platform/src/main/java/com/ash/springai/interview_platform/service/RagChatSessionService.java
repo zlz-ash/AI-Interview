@@ -11,7 +11,6 @@ import com.ash.springai.interview_platform.Repository.RagChatMessageRepository;
 import com.ash.springai.interview_platform.Repository.KnowledgeBaseRepository;
 import com.ash.springai.interview_platform.mapper.RagChatMapper;
 import com.ash.springai.interview_platform.mapper.KnowledgeBaseMapper;
-import com.ash.springai.interview_platform.enums.RetrievalMode;
 import com.ash.springai.interview_platform.Entity.RagChatDTO.CreateSessionRequest;
 import com.ash.springai.interview_platform.Entity.RagChatDTO.SessionDTO;
 import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
@@ -28,6 +27,7 @@ import java.util.HashSet;
 import reactor.core.publisher.Flux;
 
 import com.ash.springai.interview_platform.streaming.StreamPart;
+import com.ash.springai.interview_platform.enums.RetrievalMode;
 
 @Slf4j
 @Service

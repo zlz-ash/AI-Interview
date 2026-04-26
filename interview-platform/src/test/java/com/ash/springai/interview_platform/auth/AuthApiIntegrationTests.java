@@ -24,8 +24,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.filter.OncePerRequestFilter;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -70,6 +70,44 @@ class AuthApiIntegrationTests {
         when(refreshSessionRepository.findBySessionId(anyString())).thenAnswer(invocation -> {
             String sid = invocation.getArgument(0);
             return Optional.ofNullable(sessionStore.get(sid));
+        });
+        when(refreshSessionRepository.rotateRefreshJtiIfMatch(anyString(), anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
+            String sid = invocation.getArgument(0);
+            String expectedJti = invocation.getArgument(1);
+            String newJti = invocation.getArgument(2);
+            java.time.Instant rotatedAt = invocation.getArgument(3);
+            RefreshSessionStatus activeStatus = invocation.getArgument(4);
+            AuthRefreshSessionEntity entity = sessionStore.get(sid);
+            if (entity == null) {
+                return 0;
+            }
+            if (entity.getStatus() != activeStatus) {
+                return 0;
+            }
+            if (!java.util.Objects.equals(entity.getCurrentRefreshJti(), expectedJti)) {
+                return 0;
+            }
+            entity.rotateTo(newJti);
+            entity.setLastRotatedAt(rotatedAt);
+            return 1;
+        });
+        when(refreshSessionRepository.markReplayLockedIfActive(anyString(), any(), anyString(), any(), any())).thenAnswer(invocation -> {
+            String sid = invocation.getArgument(0);
+            RefreshSessionStatus lockedStatus = invocation.getArgument(1);
+            String reason = invocation.getArgument(2);
+            java.time.Instant revokedAt = invocation.getArgument(3);
+            RefreshSessionStatus activeStatus = invocation.getArgument(4);
+            AuthRefreshSessionEntity entity = sessionStore.get(sid);
+            if (entity == null) {
+                return 0;
+            }
+            if (entity.getStatus() != activeStatus) {
+                return 0;
+            }
+            entity.setStatus(lockedStatus);
+            entity.setRevokeReason(reason);
+            entity.setRevokedAt(revokedAt);
+            return 1;
         });
         doNothing().when(redisStore).delete(anyString());
 

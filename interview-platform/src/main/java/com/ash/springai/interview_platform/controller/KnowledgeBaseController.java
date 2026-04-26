@@ -123,8 +123,9 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> uploadKnowledgeBase(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "name", required = false) String name,
-            @RequestParam(value = "category", required = false) String category) {
-        return Result.success(uploadService.uploadKnowledgeBase(file, name, category));
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam("tokenizerProfileId") String tokenizerProfileId) {
+        return Result.success(uploadService.uploadKnowledgeBase(file, name, category, tokenizerProfileId));
     }
 
     @GetMapping("/api/knowledgebase/{id}/download")

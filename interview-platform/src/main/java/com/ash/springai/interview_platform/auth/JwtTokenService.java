@@ -109,6 +109,7 @@ public class JwtTokenService {
     public AccessTokenPrincipal parseAccessToken(String token) {
         Claims claims = Jwts.parser()
             .verifyWith(secretKey)
+            .requireIssuer(authProperties.getJwtIssuer())
             .build()
             .parseSignedClaims(token)
             .getPayload();
@@ -132,6 +133,7 @@ public class JwtTokenService {
     public RefreshTokenPrincipal parseRefreshToken(String token) {
         Claims claims = Jwts.parser()
             .verifyWith(secretKey)
+            .requireIssuer(authProperties.getJwtIssuer())
             .build()
             .parseSignedClaims(token)
             .getPayload();

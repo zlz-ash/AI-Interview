@@ -1,5 +1,5 @@
 import { request, getErrorMessage } from './request';
-import { clearAuthSession, getAccessToken } from '../auth/storage';
+import { clearAuthSession, getAccessToken, getRefreshToken, setAccessToken, setRefreshToken } from '../auth/storage';
 import type { StreamEnvelope } from './streamTypes';
 import { parseDualChannelSseResponse } from './parseDualChannelSse';
 
@@ -8,11 +8,14 @@ const API_BASE_URL = '';
 
 // ========== 类型定义 ==========
 
+export type RetrievalMode = 'HYBRID' | 'VECTOR';
+
 export interface RagChatSession {
   id: number;
   title: string;
   knowledgeBaseIds: number[];
   createdAt: string;
+  retrievalMode: RetrievalMode;
 }
 
 export interface RagChatSessionListItem {
@@ -50,18 +53,37 @@ export interface RagChatSessionDetail {
   messages: RagChatMessage[];
   createdAt: string;
   updatedAt: string;
+  retrievalMode: RetrievalMode;
 }
 
 // ========== API 函数 ==========
+
+async function refreshTokensForFetchOrThrow(): Promise<void> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    throw new Error('缺少 refresh token');
+  }
+  const data = await request.post<{ accessToken: string; refreshToken: string }>(`/api/auth/refresh`, { refreshToken });
+  if (!data?.accessToken || !data.accessToken.trim() || !data?.refreshToken || !data.refreshToken.trim()) {
+    throw new Error('刷新登录态失败：服务端未返回有效 token');
+  }
+  setAccessToken(data.accessToken);
+  setRefreshToken(data.refreshToken);
+}
 
 export const ragChatApi = {
   /**
    * 创建新会话
    */
-  async createSession(knowledgeBaseIds: number[], title?: string): Promise<RagChatSession> {
+  async createSession(
+    knowledgeBaseIds: number[],
+    title?: string,
+    retrievalMode?: RetrievalMode
+  ): Promise<RagChatSession> {
     return request.post<RagChatSession>('/api/rag-chat/sessions', {
       knowledgeBaseIds,
       title,
+      retrievalMode,
     });
   },
 
@@ -120,25 +142,32 @@ export const ragChatApi = {
     onError: (error: Error) => void
   ): Promise<void> {
     try {
-      const token = getAccessToken();
-      const response = await fetch(
-        `${API_BASE_URL}/api/rag-chat/sessions/${sessionId}/messages/stream`,
-        {
+      const url = `${API_BASE_URL}/api/rag-chat/sessions/${sessionId}/messages/stream`;
+      const makeRequest = async () => {
+        const token = getAccessToken();
+        return fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ question }),
-        }
-      );
+        });
+      };
+
+      let response = await makeRequest();
 
       if (!response.ok) {
         if (response.status === 401) {
-          clearAuthSession();
-          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-            const next = `${window.location.pathname}${window.location.search}`;
-            window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
+          try {
+            await refreshTokensForFetchOrThrow();
+            response = await makeRequest();
+          } catch {
+            clearAuthSession();
+            if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+              const next = `${window.location.pathname}${window.location.search}`;
+              window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
+            }
           }
         }
         try {

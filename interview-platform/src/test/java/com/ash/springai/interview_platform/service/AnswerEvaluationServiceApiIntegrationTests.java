@@ -32,6 +32,7 @@ class AnswerEvaluationServiceApiIntegrationTests {
 
     @Test
     @DisplayName("smoke-6: 真实模型应返回完整评估报告")
+    @EnabledIfEnvironmentVariable(named = "RUN_EVALUATION_IT", matches = "(?i)true")
     void shouldEvaluateSmokeQuestionSetWithRealApi() throws Exception {
         AnswerEvaluationService service = newServiceFromRealApi();
         List<InterviewQuestionDTO> questions = smokeQuestions();

@@ -1,5 +1,10 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
-import { clearAuthSession, getAccessToken } from '../auth/storage';
+import axios, {
+  AxiosError,
+  AxiosInstance,
+  AxiosRequestConfig,
+  InternalAxiosRequestConfig,
+} from 'axios';
+import { clearAuthSession, getAccessToken, getRefreshToken, setAccessToken, setRefreshToken } from '../auth/storage';
 
 /**
  * 后端统一响应结构
@@ -19,11 +24,28 @@ const instance: AxiosInstance = axios.create({
 });
 
 let isRedirectingTo401 = false;
+let refreshPromise: Promise<void> | null = null;
 
 function hasBearerAuthHeader(config: AxiosRequestConfig | undefined): boolean {
   const headers = config?.headers as Record<string, unknown> | undefined;
   const auth = headers?.Authorization ?? headers?.authorization;
   return typeof auth === 'string' && auth.startsWith('Bearer ');
+}
+
+function isAuthExcludedPath(url: string): boolean {
+  return (
+    url.includes('/api/auth/login') ||
+    url.includes('/api/auth/refresh') ||
+    url.includes('/api/auth/logout')
+  );
+}
+
+function setBearerHeader(config: AxiosRequestConfig, token: string) {
+  // Axios v1 的 headers 类型比较严格，这里按运行时合并即可
+  config.headers = {
+    ...(config.headers as unknown as Record<string, unknown> | undefined),
+    Authorization: `Bearer ${token}`,
+  } as unknown as AxiosRequestConfig['headers'];
 }
 
 function handleUnauthorizedRedirect() {
@@ -36,13 +58,39 @@ function handleUnauthorizedRedirect() {
   }
 }
 
-instance.interceptors.request.use((config) => {
+instance.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
+
+async function refreshTokensOrThrow(): Promise<void> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    throw new Error('缺少 refresh token');
+  }
+
+  refreshPromise = (async () => {
+    const data = await request.post<{
+      accessToken: string;
+      refreshToken: string;
+    }>('/api/auth/refresh', { refreshToken });
+    if (!data?.accessToken || !data.accessToken.trim() || !data?.refreshToken || !data.refreshToken.trim()) {
+      throw new Error('刷新登录态失败：服务端未返回有效 token');
+    }
+    setAccessToken(data.accessToken);
+    setRefreshToken(data.refreshToken);
+  })().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
+}
 
 /**
  * 响应拦截器
@@ -69,12 +117,31 @@ instance.interceptors.response.use(
     // 非 Result 格式，直接返回
     return response;
   },
-  (error) => {
+  async (error: AxiosError) => {
     const status = error.response?.status;
     const reqUrl = String(error.config?.url ?? '');
+    const config = error.config as (AxiosRequestConfig & { _retry?: boolean }) | undefined;
 
-    if (status === 401 && !reqUrl.includes('/api/auth/login') && hasBearerAuthHeader(error.config)) {
-      handleUnauthorizedRedirect();
+    // access token 失效：先 refresh 再重试一次原请求；失败再清理登录态
+    if (
+      status === 401 &&
+      config &&
+      !config._retry &&
+      !isAuthExcludedPath(reqUrl) &&
+      hasBearerAuthHeader(config)
+    ) {
+      config._retry = true;
+      try {
+        await refreshTokensOrThrow();
+        const newAccessToken = getAccessToken();
+        if (newAccessToken) {
+          setBearerHeader(config, newAccessToken);
+        }
+        return instance.request(config);
+      } catch {
+        handleUnauthorizedRedirect();
+        return Promise.reject(new Error('登录已过期，请重新登录'));
+      }
     }
 
     // 有响应的情况：后端返回了结果（即使是错误）
@@ -90,10 +157,10 @@ instance.interceptors.response.use(
     }
 
     // 没有响应的情况：真正的网络错误或连接被重置
-    const config = error.config;
-    const isUpload = config && (
-      config.url?.includes('/upload') ||
-      config.headers?.['Content-Type']?.toString().includes('multipart')
+    const configForNetErr = error.config;
+    const isUpload = configForNetErr && (
+      configForNetErr.url?.includes('/upload') ||
+      (configForNetErr.headers as Record<string, unknown> | undefined)?.['Content-Type']?.toString().includes('multipart')
     );
 
     if (isUpload) {

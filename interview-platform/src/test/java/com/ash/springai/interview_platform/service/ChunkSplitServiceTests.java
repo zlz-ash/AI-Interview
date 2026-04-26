@@ -2,7 +2,10 @@ package com.ash.springai.interview_platform.service;
 
 import com.ash.springai.interview_platform.Entity.IngestChunkDTO;
 import com.ash.springai.interview_platform.config.IngestProperties;
+import com.ash.springai.interview_platform.config.TokenizerProfilesProperties;
 import com.ash.springai.interview_platform.enums.DocumentType;
+import com.ash.springai.interview_platform.service.chunking.ChunkingCoreService;
+import com.ash.springai.interview_platform.service.chunking.TokenizerProfileRegistry;
 import com.ash.springai.interview_platform.service.strategy.ExcelChunkSplitter;
 import com.ash.springai.interview_platform.service.strategy.MarkdownChunkSplitter;
 import com.ash.springai.interview_platform.service.strategy.PdfChunkSplitter;
@@ -29,12 +32,7 @@ class ChunkSplitServiceTests {
 
     @Test
     void shouldDelegateMarkdownPdfAndExcel() {
-        IngestProperties props = new IngestProperties();
-        ChunkSplitService service = new ChunkSplitService(
-            new MarkdownChunkSplitter(props),
-            new ExcelChunkSplitter(props),
-            new PdfChunkSplitter(props)
-        );
+        ChunkSplitService service = buildService();
         assertFalse(service.split(DocumentType.MARKDOWN_TEXT, "# T\n\nbody").isEmpty());
         assertFalse(service.split(DocumentType.PDF_LONGFORM, "Para one.\n\nPara two.").isEmpty());
         assertFalse(service.split(DocumentType.EXCEL_TABLE, "a,b\n1,2").isEmpty());
@@ -42,11 +40,30 @@ class ChunkSplitServiceTests {
 
     @Test
     void shouldUseConfiguredChunkTargetForMarkdownSplitter() {
+        ChunkSplitService service = buildService();
+        List<IngestChunkDTO> chunks = service.split(DocumentType.MARKDOWN_TEXT, "## A\n" + "x ".repeat(1400));
+        assertFalse(chunks.isEmpty());
+        assertTrue(chunks.stream().allMatch(c -> c.tokenEstimate() <= 550));
+    }
+
+    private static ChunkSplitService buildService() {
         IngestProperties props = new IngestProperties();
         props.getMarkdown().setTargetMaxTokens(550);
-        MarkdownChunkSplitter splitter = new MarkdownChunkSplitter(props);
-        List<IngestChunkDTO> chunks = splitter.split("## A\n" + "x ".repeat(1400));
-        assertFalse(chunks.isEmpty());
-        assertTrue(chunks.stream().allMatch(c -> c.tokenEstimate() <= 560));
+
+        TokenizerProfilesProperties tokenizerProps = new TokenizerProfilesProperties();
+        TokenizerProfilesProperties.Profile profile = new TokenizerProfilesProperties.Profile();
+        profile.setId("dashscope-text-embedding-v3");
+        profile.setModel("text-embedding-v3");
+        profile.setEncoding("cl100k_base");
+        tokenizerProps.getProfiles().add(profile);
+
+        return new ChunkSplitService(
+            new MarkdownChunkSplitter(),
+            new ExcelChunkSplitter(),
+            new PdfChunkSplitter(),
+            props,
+            new TokenizerProfileRegistry(tokenizerProps),
+            new ChunkingCoreService()
+        );
     }
 }

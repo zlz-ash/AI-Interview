@@ -7,11 +7,14 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Repository
 @RequiredArgsConstructor
 public class VectorChunkBrowseRepository {
 
+    private static final Pattern TOKEN_COUNT_PATTERN = Pattern.compile("\"token_count\"\\s*:\\s*(\\d+)");
     private final JdbcTemplate jdbcTemplate;
 
     public List<ChunkItemDTO> findChunksByKnowledgeBaseId(Long knowledgeBaseId, int offset, int limit) {
@@ -72,8 +75,19 @@ public class VectorChunkBrowseRepository {
         String safeContent = content == null ? "" : content;
         String preview = safeContent.length() > 160 ? safeContent.substring(0, 160) + "..." : safeContent;
         int length = safeContent.length();
-        int tokenEstimate = Math.max(1, (int) Math.ceil(length / 4.0));
+        Integer tokenEstimate = extractTokenCount(metadata);
         return new ChunkItemDTO(chunkId, chunkIndex, preview, safeContent, length, tokenEstimate, metadata);
+    }
+
+    private static Integer extractTokenCount(String metadata) {
+        if (metadata == null || metadata.isBlank()) {
+            return null;
+        }
+        Matcher matcher = TOKEN_COUNT_PATTERN.matcher(metadata);
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        return null;
     }
 
     public record ChunkStats(double avgChunkLength, int minChunkLength, int maxChunkLength) {}
