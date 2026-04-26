@@ -2,6 +2,11 @@ import {ChangeEvent, DragEvent, useCallback, useState} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
 import {AlertCircle, FileText, Loader2, Upload, X} from 'lucide-react';
 
+type SelectOption = {
+  label: string;
+  value: string;
+};
+
 export interface FileUploadCardProps {
   /** 标题 */
   title: string;
@@ -25,12 +30,20 @@ export interface FileUploadCardProps {
   namePlaceholder?: string;
   /** 名称输入框标签 */
   nameLabel?: string;
+  /** 可选下拉配置（例如 tokenizer profile） */
+  selectOptions?: SelectOption[];
+  /** 下拉标签 */
+  selectLabel?: string;
+  /** 下拉值 */
+  selectValue?: string;
+  /** 下拉值变更 */
+  onSelectValueChange?: (value: string) => void;
   /** 错误信息 */
   error?: string;
   /** 文件选择回调 */
   onFileSelect?: (file: File) => void;
   /** 上传回调 */
-  onUpload: (file: File, name?: string) => void;
+  onUpload: (file: File, name?: string, selectedOptionValue?: string) => void;
   /** 返回回调 */
   onBack?: () => void;
 }
@@ -47,6 +60,10 @@ export default function FileUploadCard({
   showNameInput = false,
   namePlaceholder = '留空则使用文件名',
   nameLabel = '名称（可选）',
+  selectOptions,
+  selectLabel = '选项',
+  selectValue,
+  onSelectValueChange,
   error,
   onFileSelect,
   onUpload,
@@ -86,7 +103,7 @@ export default function FileUploadCard({
 
   const handleUpload = () => {
     if (!selectedFile) return;
-    onUpload(selectedFile, name.trim() || undefined);
+    onUpload(selectedFile, name.trim() || undefined, selectValue);
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -223,22 +240,45 @@ export default function FileUploadCard({
       </motion.div>
 
       {/* 名称输入框 */}
-      {showNameInput && selectedFile && (
+      {(showNameInput || (selectOptions && selectOptions.length > 0)) && selectedFile && (
         <motion.div
           className="dark-card mt-6 p-6"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <label className="mb-2 block text-sm font-semibold text-stone-700 dark:text-stone-300">{nameLabel}</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={namePlaceholder}
-            className="dark-input w-full rounded-xl px-4 py-3 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
-            disabled={uploading}
-            onClick={(e) => e.stopPropagation()}
-          />
+          {showNameInput && (
+            <>
+              <label className="mb-2 block text-sm font-semibold text-stone-700 dark:text-stone-300">{nameLabel}</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={namePlaceholder}
+                className="dark-input w-full rounded-xl px-4 py-3 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                disabled={uploading}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </>
+          )}
+
+          {selectOptions && selectOptions.length > 0 && (
+            <div className={showNameInput ? 'mt-4' : ''}>
+              <label className="mb-2 block text-sm font-semibold text-stone-700 dark:text-stone-300">{selectLabel}</label>
+              <select
+                value={selectValue}
+                onChange={(e) => onSelectValueChange?.(e.target.value)}
+                className="dark-input w-full rounded-xl px-4 py-3 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                disabled={uploading}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {selectOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </motion.div>
       )}
 

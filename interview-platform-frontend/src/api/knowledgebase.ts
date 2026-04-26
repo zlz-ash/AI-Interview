@@ -1,7 +1,4 @@
-import {getErrorMessage, request} from './request';
-import { clearAuthSession, getAccessToken } from '../auth/storage';
-import type { StreamEnvelope } from './streamTypes';
-import { parseDualChannelSseResponse } from './parseDualChannelSse';
+import { request } from './request';
 
 // 向量化状态
 export type VectorStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -48,24 +45,27 @@ export interface UploadKnowledgeBaseResponse {
   duplicate: boolean;
 }
 
-export interface QueryRequest {
-  knowledgeBaseIds: number[];  // 支持多个知识库
-  question: string;
-}
-
-export interface QueryResponse {
-  answer: string;
-  knowledgeBaseId: number;
-  knowledgeBaseName: string;
+export interface TokenizerProfileOption {
+  id: string;
+  model: string;
+  encoding: string;
+  isDefault: boolean;
 }
 
 export const knowledgeBaseApi = {
+  defaultTokenizerProfileId: 'dashscope-text-embedding-v3',
   /**
    * 上传知识库文件
    */
-  async uploadKnowledgeBase(file: File, name?: string, category?: string): Promise<UploadKnowledgeBaseResponse> {
+  async uploadKnowledgeBase(
+    file: File,
+    name?: string,
+    category?: string,
+    tokenizerProfileId: string = 'dashscope-text-embedding-v3'
+  ): Promise<UploadKnowledgeBaseResponse> {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('tokenizerProfileId', tokenizerProfileId);
     if (name) {
       formData.append('name', name);
     }
@@ -73,6 +73,10 @@ export const knowledgeBaseApi = {
       formData.append('category', category);
     }
     return request.upload<UploadKnowledgeBaseResponse>('/api/knowledgebase/upload', formData);
+  },
+
+  async listTokenizerProfiles(): Promise<TokenizerProfileOption[]> {
+    return request.get<TokenizerProfileOption[]>('/api/knowledgebase/tokenizer-profiles');
   },
 
     /**
@@ -169,59 +173,5 @@ export const knowledgeBaseApi = {
    */
   async revectorize(id: number): Promise<void> {
     return request.post(`/api/knowledgebase/${id}/revectorize`);
-  },
-
-  /**
-   * 基于知识库回答问题
-   */
-  async queryKnowledgeBase(req: QueryRequest): Promise<QueryResponse> {
-    return request.post<QueryResponse>('/api/knowledgebase/query', req, {
-      timeout: 180000, // 3分钟超时
-    });
-  },
-
-  /**
-   * 基于知识库回答问题（流式 SSE，JSON 信封 + `[DONE]`）
-   */
-  async queryKnowledgeBaseStream(
-    req: QueryRequest,
-    onPart: (part: StreamEnvelope) => void,
-    onComplete: () => void,
-    onError: (error: Error) => void
-  ): Promise<void> {
-    try {
-      const token = getAccessToken();
-      const response = await fetch(`/api/knowledgebase/query/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(req),
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          clearAuthSession();
-          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-            const next = `${window.location.pathname}${window.location.search}`;
-            window.location.replace(`/login?redirect=${encodeURIComponent(next)}`);
-          }
-        }
-        try {
-          const errorData = await response.json();
-          if (errorData && errorData.message) {
-            throw new Error(errorData.message);
-          }
-        } catch {
-          // 忽略解析错误
-        }
-        throw new Error(`请求失败 (${response.status})`);
-      }
-
-      await parseDualChannelSseResponse(response, onPart, onComplete, onError);
-    } catch (error) {
-      onError(new Error(getErrorMessage(error)));
-    }
   },
 };

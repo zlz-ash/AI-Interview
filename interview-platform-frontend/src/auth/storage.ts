@@ -1,4 +1,5 @@
 const ACCESS_TOKEN_KEY = 'interview_platform_access_token';
+const REFRESH_TOKEN_KEY = 'interview_platform_refresh_token';
 const USERNAME_KEY = 'interview_platform_username';
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -53,6 +54,33 @@ export function clearAccessToken(): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
+export function getRefreshToken(): string | null {
+  const raw = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (!raw) {
+    return null;
+  }
+  const token = raw.trim();
+  if (!token) {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    return null;
+  }
+  // refresh token 的格式/过期交给服务端判断，前端不做结构校验，避免误删
+  return token;
+}
+
+export function setRefreshToken(token: string): void {
+  const normalized = token?.trim?.() ?? '';
+  if (!normalized) {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    return;
+  }
+  localStorage.setItem(REFRESH_TOKEN_KEY, normalized);
+}
+
+export function clearRefreshToken(): void {
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
 export function getStoredUsername(): string | null {
   return localStorage.getItem(USERNAME_KEY);
 }
@@ -67,5 +95,6 @@ export function clearStoredUsername(): void {
 
 export function clearAuthSession(): void {
   clearAccessToken();
+  clearRefreshToken();
   clearStoredUsername();
 }

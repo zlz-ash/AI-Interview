@@ -68,6 +68,15 @@ public class KnowledgeBaseEntity {
     @Column(length = 32)
     private String ingestStatus;
 
+    @Column(length = 64)
+    private String tokenizerProfileId;
+
+    @Column(length = 128)
+    private String tokenizerModel;
+
+    @Column(length = 32)
+    private String chunkingPolicyVersion;
+
     @Column(length = 500)
     private String vectorError;
 

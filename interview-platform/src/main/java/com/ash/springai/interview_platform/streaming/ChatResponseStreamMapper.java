@@ -19,7 +19,8 @@ import reactor.core.publisher.Flux;
  */
 public final class ChatResponseStreamMapper {
 
-    private static final List<String> REASONING_KEYS = List.of("reasoning", "reasoning_content", "thinking");
+    private static final List<String> REASONING_KEYS =
+            List.of("reasoningContent", "reasoning", "reasoning_content", "thinking");
 
     private ChatResponseStreamMapper() {
     }

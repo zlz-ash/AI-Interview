@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import com.ash.springai.interview_platform.Repository.KnowledgeBaseRepository;
 import com.ash.springai.interview_platform.Entity.IngestChunkDTO;
+import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
 import com.ash.springai.interview_platform.Repository.VectorRepository;
 import com.ash.springai.interview_platform.service.ChunkEnrichService;
 import com.ash.springai.interview_platform.service.ChunkSplitService;
@@ -137,11 +138,16 @@ public class VectorizeStreamConsumer extends AbstractStreamConsumer<VectorizeStr
 
     @Override
     protected void processBusiness(VectorizePayload payload) {
+        KnowledgeBaseEntity kb = knowledgeBaseRepository.findById(payload.kbId())
+            .orElseThrow(() -> new IllegalStateException("知识库不存在"));
         String content = parseService.downloadAndParseContent(payload.storageKey(), payload.originalFilename());
         DocumentType type = router.route(payload.contentType(), payload.originalFilename(), content);
         syncDocumentTypeOnEntity(payload.kbId(), type, payload.ingestVersion());
 
-        List<IngestChunkDTO> chunks = splitService.split(type, content);
+        String tokenizerProfileId = kb.getTokenizerProfileId();
+        List<IngestChunkDTO> chunks = (tokenizerProfileId == null || tokenizerProfileId.isBlank())
+            ? splitService.split(type, content)
+            : splitService.split(type, content, tokenizerProfileId);
         if (chunks.isEmpty()) {
             throw new IllegalStateException("切分结果为空");
         }
@@ -152,7 +158,7 @@ public class VectorizeStreamConsumer extends AbstractStreamConsumer<VectorizeStr
             .map(c -> enrichService.enrich(c, type, kbIdStr, docId))
             .collect(Collectors.toList());
 
-        validateEnrichedChunks(enriched);
+        validateEnrichedChunks(enriched); 
 
         vectorService.vectorizeAndStoreChunks(payload.kbId(), enriched);
 

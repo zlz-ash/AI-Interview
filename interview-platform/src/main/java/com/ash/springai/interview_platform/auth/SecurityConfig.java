@@ -2,7 +2,7 @@ package com.ash.springai.interview_platform.auth;
 
 import com.ash.springai.interview_platform.common.Result;
 import com.ash.springai.interview_platform.exception.ErrorCode;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

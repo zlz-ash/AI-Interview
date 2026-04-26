@@ -10,6 +10,7 @@ import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
 import com.ash.springai.interview_platform.exception.BusinessException;
 import com.ash.springai.interview_platform.exception.ErrorCode;
 import com.ash.springai.interview_platform.enums.VectorStatus;
+import com.ash.springai.interview_platform.service.chunking.TokenizerProfileRegistry;
 
 import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
@@ -31,10 +32,16 @@ public class KnowledgeBaseUploadService {
     private final VectorizeStreamProducer vectorizeStreamProducer;
     private final DocumentTypeRouterService documentTypeRouterService;
     private final IngestProperties ingestProperties;
+    private final TokenizerProfileRegistry tokenizerProfileRegistry;
 
     private static final long MAX_FILE_SIZE = 50 * 1024 * 1024;
 
-    public Map<String, Object> uploadKnowledgeBase(MultipartFile file, String name, String category){
+    public Map<String, Object> uploadKnowledgeBase(MultipartFile file, String name, String category, String tokenizerProfileId){
+
+        if (tokenizerProfileId == null || tokenizerProfileId.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "tokenizerProfileId 不能为空");
+        }
+        TokenizerProfileRegistry.ProfileView tokenizerProfile = requireTokenizerProfile(tokenizerProfileId);
 
         fileValidationService.validateFile(file, MAX_FILE_SIZE, "知识库");
 
@@ -63,7 +70,8 @@ public class KnowledgeBaseUploadService {
         var docType = documentTypeRouterService.route(contentType, fileName, content);
         KnowledgeBaseEntity savedKb = persistenceService.saveKnowledgeBase(
             file, name, category, fileKey, fileUrl, fileHash,
-            docType, ingestProperties.getVersion()
+            docType, ingestProperties.getVersion(),
+            tokenizerProfile.id(), tokenizerProfile.model(), "v1"
         );
 
         vectorizeStreamProducer.sendVectorizeTask(
@@ -92,6 +100,14 @@ public class KnowledgeBaseUploadService {
             "duplicate", false
         );
 
+    }
+
+    private TokenizerProfileRegistry.ProfileView requireTokenizerProfile(String tokenizerProfileId) {
+        try {
+            return tokenizerProfileRegistry.require(tokenizerProfileId);
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, ex.getMessage());
+        }
     }
 
     private void validateContentType(String contentType, String fileName) {

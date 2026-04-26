@@ -1,6 +1,7 @@
 package com.ash.springai.interview_platform.listener;
 
 import com.ash.springai.interview_platform.Entity.IngestChunkDTO;
+import com.ash.springai.interview_platform.Entity.KnowledgeBaseEntity;
 import com.ash.springai.interview_platform.Repository.KnowledgeBaseRepository;
 import com.ash.springai.interview_platform.Repository.VectorRepository;
 import com.ash.springai.interview_platform.common.AsyncTaskStreamConstants;
@@ -33,12 +34,16 @@ class VectorizeStreamConsumerPipelineTests {
     void shouldRunFiveStagePipelineInConsumer() {
         KnowledgeBaseVectorService vectorService = mock(KnowledgeBaseVectorService.class);
         KnowledgeBaseRepository kbRepo = mock(KnowledgeBaseRepository.class);
+        KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setId(1L);
+        kb.setTokenizerProfileId("dashscope-text-embedding-v3");
+        when(kbRepo.findById(1L)).thenReturn(java.util.Optional.of(kb));
         KnowledgeBaseParseService parseService = mock(KnowledgeBaseParseService.class);
         when(parseService.downloadAndParseContent(anyString(), anyString())).thenReturn("parsed-body");
         DocumentTypeRouterService router = mock(DocumentTypeRouterService.class);
         when(router.route(any(), any(), anyString())).thenReturn(DocumentType.PDF_LONGFORM);
         ChunkSplitService splitService = mock(ChunkSplitService.class);
-        when(splitService.split(any(), anyString())).thenReturn(
+        when(splitService.split(any(), anyString(), anyString())).thenReturn(
             List.of(new IngestChunkDTO(1, "chunk", 2, new HashMap<>()))
         );
         ChunkEnrichService enrichService = mock(ChunkEnrichService.class);
@@ -70,7 +75,7 @@ class VectorizeStreamConsumerPipelineTests {
         consumer.processBusiness(payload);
 
         verify(parseService).downloadAndParseContent("kb/1/demo.pdf", "demo.pdf");
-        verify(splitService).split(any(), eq("parsed-body"));
+        verify(splitService).split(any(), eq("parsed-body"), eq("dashscope-text-embedding-v3"));
         verify(enrichService, atLeastOnce()).enrich(any(), any(), anyString(), anyString());
         verify(vectorService).vectorizeAndStoreChunks(eq(1L), anyList());
     }

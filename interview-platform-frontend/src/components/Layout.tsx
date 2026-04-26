@@ -13,7 +13,8 @@ import {
   Users,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
-import { clearAuthSession, getStoredUsername } from '../auth/storage';
+import { authApi } from '../api/auth';
+import { clearAuthSession, getRefreshToken, getStoredUsername } from '../auth/storage';
 
 interface NavItem {
   id: string;
@@ -182,9 +183,16 @@ export default function Layout() {
             <p className="mt-0.5 text-[0.7rem] text-stone-500 dark:text-stone-400">试炼台 · 工作台</p>
             <button
               type="button"
-              onClick={() => {
-                clearAuthSession();
-                navigate('/login', { replace: true });
+              onClick={async () => {
+                try {
+                  const refreshToken = getRefreshToken();
+                  if (refreshToken) {
+                    await authApi.logout({ refreshToken });
+                  }
+                } finally {
+                  clearAuthSession();
+                  navigate('/login', { replace: true });
+                }
               }}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-stone-200/80 bg-white/60 py-2 text-xs font-medium text-stone-600 transition hover:bg-white dark:border-stone-600 dark:bg-stone-900/50 dark:text-stone-300 dark:hover:bg-stone-800"
             >

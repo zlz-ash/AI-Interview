@@ -15,6 +15,7 @@ public class RefreshSessionService {
 
     private static final String INVALID_REFRESH_TOKEN = "无效或过期的 refresh token";
     private static final String REPLAY_MESSAGE = "检测到异常刷新行为，请重新登录";
+    private static final String REPLAY_REASON = "REPLAY_DETECTED";
 
     private final AuthRefreshSessionRepository repository;
     private final RefreshSessionRedisStore redisStore;
@@ -49,14 +50,25 @@ public class RefreshSessionService {
             throw new BadCredentialsException(INVALID_REFRESH_TOKEN);
         }
         if (!Objects.equals(entity.getCurrentRefreshJti(), presentedJti)) {
-            entity.markReplayLocked();
-            repository.save(entity);
-            redisStore.save(toRedis(entity), ttl(entity.getExpiresAt()));
+            lockReplay(entity);
             throw new BadCredentialsException(REPLAY_MESSAGE);
         }
+
         String newJti = UUID.randomUUID().toString();
+        int updated = repository.rotateRefreshJtiIfMatch(
+            sessionId,
+            presentedJti,
+            newJti,
+            Instant.now(),
+            RefreshSessionStatus.ACTIVE
+        );
+
+        if (updated != 1) {
+            lockReplay(entity);
+            throw new BadCredentialsException(REPLAY_MESSAGE);
+        }
+
         entity.rotateTo(newJti);
-        repository.save(entity);
         redisStore.save(toRedis(entity), ttl(entity.getExpiresAt()));
         return new RotatedSession(entity.getSessionId(), newJti, entity.getUserId(), entity.getUsername());
     }
@@ -82,6 +94,18 @@ public class RefreshSessionService {
 
     private Duration ttl(Instant expiresAt) {
         return Duration.between(Instant.now(), expiresAt);
+    }
+
+    private void lockReplay(AuthRefreshSessionEntity entity) {
+        repository.markReplayLockedIfActive(
+            entity.getSessionId(),
+            RefreshSessionStatus.REPLAY_LOCKED,
+            REPLAY_REASON,
+            Instant.now(),
+            RefreshSessionStatus.ACTIVE
+        );
+        entity.markReplayLocked();
+        redisStore.save(toRedis(entity), ttl(entity.getExpiresAt()));
     }
 
     public record CreatedSession(

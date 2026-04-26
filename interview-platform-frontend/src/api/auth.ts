@@ -9,17 +9,26 @@ export interface LoginPayload {
 export interface LoginData {
   tokenType: string;
   accessToken: string;
-  expiresIn: number;
+  accessExpiresIn: number;
+  refreshToken: string;
+  refreshExpiresIn: number;
   issuedAt: number;
   username: string;
   roles: string[];
   permissions: string[];
-  rememberMe: boolean;
 }
 
 export interface MeData {
   username: string;
   roles: string[];
+}
+
+export interface RefreshTokenRequest {
+  refreshToken: string;
+}
+
+export interface LogoutRequest {
+  refreshToken: string;
 }
 
 export const authApi = {
@@ -29,6 +38,14 @@ export const authApi = {
       password: body.password,
       rememberMe: body.rememberMe === true,
     });
+  },
+
+  refresh(body: RefreshTokenRequest): Promise<LoginData> {
+    return request.post<LoginData>('/api/auth/refresh', body);
+  },
+
+  logout(body: LogoutRequest): Promise<void> {
+    return request.post<void>('/api/auth/logout', body);
   },
 
   me(): Promise<MeData> {
